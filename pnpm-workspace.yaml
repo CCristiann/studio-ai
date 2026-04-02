@@ -1,3 +1,4 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # bridge/ (Python) and plugin/ (Rust) are intentionally excluded — managed outside pnpm
