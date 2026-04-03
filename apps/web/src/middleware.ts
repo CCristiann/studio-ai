@@ -6,8 +6,10 @@ export default auth((req) => {
   const isAuthenticated = !!req.auth;
 
   // Public routes that don't require auth
-  const publicPaths = ["/", "/login", "/api/auth", "/api/stripe/webhook"];
-  const isPublic = publicPaths.some((path) => pathname.startsWith(path));
+  const publicPaths = ["/login", "/api/auth", "/api/stripe/webhook"];
+  const isPublic =
+    pathname === "/" ||
+    publicPaths.some((path) => pathname.startsWith(path));
 
   if (isPublic) return NextResponse.next();
 
