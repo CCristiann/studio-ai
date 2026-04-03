@@ -29,7 +29,7 @@ export function PluginLogin() {
       );
 
       // Redirect WebView to authorize page (will redirect to Google OAuth if needed)
-      window.location.href = `/auth/device/authorize?session_id=${session_id}`;
+      window.location.href = `/auth/device/authorize?session_id=${session_id}&context=plugin`;
     } catch {
       setError("Connection error. Is the server running?");
       setLoading(false);

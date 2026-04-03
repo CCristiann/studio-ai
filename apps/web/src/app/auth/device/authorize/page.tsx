@@ -5,9 +5,10 @@ import { approveDeviceSession, findDeviceSession } from "@/lib/device-session";
 export default async function AuthorizeDevicePage({
   searchParams,
 }: {
-  searchParams: Promise<{ session_id?: string }>;
+  searchParams: Promise<{ session_id?: string; context?: string }>;
 }) {
-  const { session_id } = await searchParams;
+  const { session_id, context } = await searchParams;
+  const isPlugin = context === "plugin";
 
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!session_id || !uuidRegex.test(session_id)) {
@@ -21,7 +22,7 @@ export default async function AuthorizeDevicePage({
   const userSession = await auth();
 
   if (!userSession?.userId) {
-    const callbackUrl = `/auth/device/authorize?session_id=${session_id}`;
+    const callbackUrl = `/auth/device/authorize?session_id=${session_id}${isPlugin ? "&context=plugin" : ""}`;
     redirect(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
 
