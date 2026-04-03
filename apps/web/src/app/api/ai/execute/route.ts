@@ -1,22 +1,26 @@
-import { streamText, tool, stepCountIs } from "ai";
+import { streamText, tool, stepCountIs, UIMessage, convertToModelMessages } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { relay, RelayError } from "@/lib/relay";
 
-export async function POST(req: Request) {
+async function getUserId(): Promise<string | null> {
   const session = await auth();
-  if (!session?.userId) {
+  return session?.userId ?? null;
+}
+
+export async function POST(req: Request) {
+  const userId = await getUserId();
+  if (!userId) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { messages } = await req.json();
-  const userId = session.userId;
+  const { messages }: { messages: UIMessage[] } = await req.json();
 
   const result = streamText({
-    model: google("gemini-2.0-flash"),
+    model: google("gemini-2.5-flash"),
     system: `You are Studio AI, an AI assistant that controls Digital Audio Workstations (DAWs) through natural language. You can set BPM, add tracks, get project state, and control playback. When the user asks you to do something in their DAW, use the appropriate tool. Always confirm what you did after executing a command.`,
-    messages,
+    messages: await convertToModelMessages(messages),
     tools: {
       set_bpm: tool({
         description: "Set the BPM (tempo) of the current project. Valid range: 10-999.",
