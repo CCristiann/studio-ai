@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import { SupabaseAdapter } from "@auth/supabase-adapter";
 import Google from "next-auth/providers/google";
-import jwt from "jsonwebtoken";
+import { SignJWT } from "jose";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [Google],
@@ -13,14 +13,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, user }) {
       const signingSecret = process.env.SUPABASE_JWT_SECRET;
       if (signingSecret) {
-        const payload = {
+        const secret = new TextEncoder().encode(signingSecret);
+        session.supabaseAccessToken = await new SignJWT({
           aud: "authenticated",
-          exp: Math.floor(new Date(session.expires).getTime() / 1000),
           sub: user.id,
           email: user.email,
           role: "authenticated",
-        };
-        session.supabaseAccessToken = jwt.sign(payload, signingSecret);
+        })
+          .setProtectedHeader({ alg: "HS256" })
+          .setExpirationTime(new Date(session.expires))
+          .sign(secret);
       }
       session.userId = user.id;
       return session;

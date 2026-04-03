@@ -1,18 +1,21 @@
 //! Studio AI VST3 Plugin
 
 use nih_plug::prelude::*;
+use nih_plug_webview::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-mod state;
 mod ipc;
-mod websocket_cloud;
+mod state;
 mod websocket_bridge;
+mod websocket_cloud;
 
 use state::{create_shared_state, SharedState};
 
 struct StudioAiPlugin {
     params: Arc<StudioAiParams>,
     shared_state: SharedState,
+    ws_started: Arc<AtomicBool>,
 }
 
 #[derive(Params)]
@@ -23,8 +26,31 @@ impl Default for StudioAiPlugin {
         Self {
             params: Arc::new(StudioAiParams {}),
             shared_state: create_shared_state(),
+            ws_started: Arc::new(AtomicBool::new(false)),
         }
     }
+}
+
+fn start_websockets(shared_state: SharedState) {
+    std::thread::Builder::new()
+        .name("studio-ai-ws".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create Tokio runtime");
+
+            rt.block_on(async {
+                let cloud_state = shared_state.clone();
+                let bridge_state = shared_state.clone();
+
+                tokio::join!(
+                    websocket_cloud::run(cloud_state),
+                    websocket_bridge::run(bridge_state),
+                );
+            });
+        })
+        .ok();
 }
 
 impl Plugin for StudioAiPlugin {
@@ -33,7 +59,15 @@ impl Plugin for StudioAiPlugin {
     const URL: &'static str = "https://studioai.app";
     const EMAIL: &'static str = "support@studioai.app";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[];
+
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+        aux_input_ports: &[],
+        aux_output_ports: &[],
+        names: PortNames::const_default(),
+    }];
+
     type SysExMessage = ();
     type BackgroundTask = ();
 
@@ -41,35 +75,42 @@ impl Plugin for StudioAiPlugin {
         self.params.clone()
     }
 
-    fn initialize(
-        &mut self,
-        _audio_io_layout: &AudioIOLayout,
-        _buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
-    ) -> bool {
-        let state = self.shared_state.clone();
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let shared_state = self.shared_state.clone();
+        let ws_started = self.ws_started.clone();
 
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new()
-                .expect("Failed to create Tokio runtime");
-
-            let cloud_state = state.clone();
-            let bridge_state = state.clone();
-
-            rt.block_on(async {
-                let cloud_handle = tokio::spawn(async move {
-                    websocket_cloud::run(cloud_state).await;
-                });
-
-                let bridge_handle = tokio::spawn(async move {
-                    websocket_bridge::run(bridge_state).await;
-                });
-
-                let _ = tokio::join!(cloud_handle, bridge_handle);
-            });
+        let editor = WebViewEditor::new(
+            HTMLSource::URL("http://localhost:3000?context=plugin"),
+            (900, 700),
+        )
+        .with_background_color((18, 18, 18, 255))
+        .with_developer_mode(true)
+        .with_event_loop(move |ctx, _setter, _window| {
+            while let Ok(value) = ctx.next_event() {
+                if let Some(msg_type) = value.get("type").and_then(|t| t.as_str()) {
+                    match msg_type {
+                        "sendToken" => {
+                            if let Some(token) = value
+                                .get("payload")
+                                .and_then(|p| p.get("token"))
+                                .and_then(|t| t.as_str())
+                            {
+                                if let Ok(mut state) = shared_state.try_lock() {
+                                    state.set_token(token.to_string());
+                                }
+                                // Start WS threads on first token, once
+                                if !ws_started.swap(true, Ordering::SeqCst) {
+                                    start_websockets(shared_state.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
         });
 
-        true
+        Some(Box::new(editor))
     }
 
     fn process(
