@@ -2,14 +2,20 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isToolUIPart, getToolName } from "ai";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 
-const transport = new DefaultChatTransport({ api: "/api/ai/execute" });
-
-export function PluginChat() {
+export function PluginChat({ token }: { token: string }) {
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/ai/execute",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    [token]
+  );
   const { messages, sendMessage, status, error } = useChat({ transport });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);

@@ -2,15 +2,23 @@ import { streamText, tool, stepCountIs, UIMessage, convertToModelMessages } from
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { verifyPluginToken } from "@/lib/plugin-auth";
 import { relay, RelayError } from "@/lib/relay";
 
-async function getUserId(): Promise<string | null> {
+async function getUserId(req: Request): Promise<string | null> {
+  // 1. Try Bearer token (plugin WebView)
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const result = await verifyPluginToken(authHeader.slice(7));
+    if (result) return result.userId;
+  }
+  // 2. Fall back to session cookie (browser dashboard)
   const session = await auth();
   return session?.userId ?? null;
 }
 
 export async function POST(req: Request) {
-  const userId = await getUserId();
+  const userId = await getUserId(req);
   if (!userId) {
     return new Response("Unauthorized", { status: 401 });
   }
