@@ -40,15 +40,9 @@ export default async function AuthorizeDevicePage({
     );
   }
 
+  // Already approved — redirect back to plugin
   if (deviceSession.status === "approved") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center space-y-2">
-          <h1 className="text-xl font-semibold text-green-600">Plugin Authorized</h1>
-          <p className="text-muted-foreground">You can close this tab.</p>
-        </div>
-      </div>
-    );
+    redirect("/plugin?context=plugin");
   }
 
   async function approve() {
@@ -60,9 +54,10 @@ export default async function AuthorizeDevicePage({
     try {
       await approveDeviceSession(session_id, userSession.userId);
     } catch {
-      redirect(`/auth/device/authorize?session_id=${session_id}`);
+      // Session may have expired, redirect will show appropriate state
     }
-    redirect(`/auth/device/authorize?session_id=${session_id}`);
+    // Redirect back to plugin — the plugin page will do the token exchange
+    redirect("/plugin?context=plugin");
   }
 
   return (

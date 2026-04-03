@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { PluginChat } from "./plugin-chat";
 import { PluginLogin } from "./plugin-login";
 
@@ -9,32 +9,61 @@ export default function PluginPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("studio-ai-token");
-    if (stored) {
-      // Quick client-side expiry check (JWT payload is base64url)
-      try {
-        const base64 = stored.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-        const payload = JSON.parse(atob(base64));
-        if (payload.exp && payload.exp * 1000 > Date.now()) {
-          setToken(stored);
-        } else {
-          localStorage.removeItem("studio-ai-token");
+    async function init() {
+      // 1. Check for existing valid token
+      const stored = localStorage.getItem("studio-ai-token");
+      if (stored) {
+        try {
+          const base64 = stored.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+          const payload = JSON.parse(atob(base64));
+          if (payload.exp && payload.exp * 1000 > Date.now()) {
+            setToken(stored);
+            setReady(true);
+            return;
+          }
+        } catch {
+          // Invalid token, continue
         }
-      } catch {
         localStorage.removeItem("studio-ai-token");
       }
-    }
-    setReady(true);
-  }, []);
 
-  const handleToken = useCallback((newToken: string) => {
-    setToken(newToken);
+      // 2. Check for pending device auth (returning from authorize page)
+      const pending = localStorage.getItem("studio-ai-pending-auth");
+      if (pending) {
+        try {
+          const { session_id, device_code } = JSON.parse(pending);
+          localStorage.removeItem("studio-ai-pending-auth");
+
+          const res = await fetch("/api/auth/device/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id, device_code }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === "complete" && data.token) {
+              localStorage.setItem("studio-ai-token", data.token);
+              setToken(data.token);
+              setReady(true);
+              return;
+            }
+          }
+        } catch {
+          // Exchange failed, show login
+        }
+      }
+
+      setReady(true);
+    }
+
+    init();
   }, []);
 
   if (!ready) return null;
 
   if (!token) {
-    return <PluginLogin onToken={handleToken} />;
+    return <PluginLogin />;
   }
 
   return <PluginChat token={token} />;
