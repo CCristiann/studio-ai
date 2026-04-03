@@ -1,5 +1,13 @@
-import { ChatInterface } from "@/components/chat/chat-interface";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { PluginChat } from "./plugin-chat";
 
-export default function PluginPage() {
-  return <ChatInterface />;
+export default async function PluginPage() {
+  const session = await auth();
+
+  if (!session?.userId) {
+    redirect("/login");
+  }
+
+  return <PluginChat />;
 }
