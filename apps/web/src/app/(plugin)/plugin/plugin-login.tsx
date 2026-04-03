@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -13,8 +13,21 @@ export function PluginLogin({
 }) {
   const [state, setState] = useState<AuthState>("idle");
   const [error, setError] = useState("");
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   const startAuth = useCallback(async () => {
+    // Clear any previous polling
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
     setState("waiting");
     setError("");
 
@@ -35,7 +48,7 @@ export function PluginLogin({
       );
 
       // Poll for completion
-      const pollInterval = setInterval(async () => {
+      intervalRef.current = setInterval(async () => {
         try {
           const pollRes = await fetch("/api/auth/device/token", {
             method: "POST",
@@ -44,7 +57,7 @@ export function PluginLogin({
           });
 
           if (!pollRes.ok) {
-            clearInterval(pollInterval);
+            if (intervalRef.current) clearInterval(intervalRef.current);
             setState("error");
             setError("Authentication failed. Please try again.");
             return;
@@ -53,12 +66,12 @@ export function PluginLogin({
           const data = await pollRes.json();
 
           if (data.status === "complete") {
-            clearInterval(pollInterval);
+            if (intervalRef.current) clearInterval(intervalRef.current);
             localStorage.setItem("studio-ai-token", data.token);
             setState("complete");
             onToken(data.token);
           } else if (data.status === "expired") {
-            clearInterval(pollInterval);
+            if (intervalRef.current) clearInterval(intervalRef.current);
             setState("expired");
           }
         } catch {
@@ -67,8 +80,8 @@ export function PluginLogin({
       }, (interval || 2) * 1000);
 
       // Stop polling after 5 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
+      timeoutRef.current = setTimeout(() => {
+        if (intervalRef.current) clearInterval(intervalRef.current);
         setState((current) => (current === "waiting" ? "expired" : current));
       }, 5 * 60 * 1000);
     } catch {

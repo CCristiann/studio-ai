@@ -9,10 +9,11 @@ export default async function AuthorizeDevicePage({
 }) {
   const { session_id } = await searchParams;
 
-  if (!session_id) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!session_id || !uuidRegex.test(session_id)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-destructive">Missing session ID.</p>
+        <p className="text-destructive">Invalid session ID.</p>
       </div>
     );
   }
@@ -56,7 +57,11 @@ export default async function AuthorizeDevicePage({
     const userSession = await auth();
     if (!userSession?.userId || !session_id) return;
 
-    await approveDeviceSession(session_id, userSession.userId);
+    try {
+      await approveDeviceSession(session_id, userSession.userId);
+    } catch {
+      redirect(`/auth/device/authorize?session_id=${session_id}`);
+    }
     redirect(`/auth/device/authorize?session_id=${session_id}`);
   }
 
