@@ -22,7 +22,7 @@ An AI agent that intelligently organizes FL Studio projects — both cleaning up
 
 ## Agent Architecture
 
-Two-stage agentic pipeline using Vercel AI SDK's `ToolLoopAgent` and `generateText` with tool calling.
+Three-stage pipeline (two AI, one deterministic) using Vercel AI SDK's `ToolLoopAgent` and `generateText` with tool calling.
 
 ### Stage 1: Analysis Agent
 
@@ -63,7 +63,6 @@ Two-stage agentic pipeline using Vercel AI SDK's `ToolLoopAgent` and `generateTe
       "reasoning": "Single repeated note at low pitch, rhythmic on-beat pattern"
     }
   ],
-  "roleGroups": ["drums", "bass", "leads", "pads", "fx", "vocals"]
 }
 ```
 
@@ -83,7 +82,6 @@ const projectMapSchema = z.object({
     confidence: z.enum(['high', 'medium', 'low']),
     reasoning: z.string(),
   })),
-  roleGroups: z.array(z.string()),
 });
 
 const analysisAgent = new ToolLoopAgent({
@@ -105,7 +103,7 @@ const analysisAgent = new ToolLoopAgent({
     }),
   },
   output: Output.object({ schema: projectMapSchema }),
-  stopWhen: isStepCount(10),
+  stopWhen: isStepCount(15), // budget: 1 get_project_state + up to 8 get_pattern_notes + structured output step + margin
 });
 
 const { output: projectMap } = await analysisAgent.generate({
@@ -123,74 +121,91 @@ const { output: projectMap } = await analysisAgent.generate({
 
 **No tools needed** — pure reasoning over structured input, structured output.
 
-**Output — Organization Plan:**
+The AI outputs **only naming and role assignments**. Color values are computed deterministically by code after the AI responds (see Color System section). This prevents the AI from picking arbitrary hex values.
+
+**Output — Organization Plan (from AI):**
 ```json
 {
-  "actions": [
-    { "type": "rename_channel", "params": { "index": 0, "name": "808" } },
-    { "type": "set_channel_color", "params": { "index": 0, "color": 2846783 } },
-    { "type": "rename_mixer_track", "params": { "index": 1, "name": "808" } },
-    { "type": "set_mixer_track_color", "params": { "index": 1, "color": 2846783 } },
-    { "type": "set_channel_insert", "params": { "index": 5, "insert": 6 } }
+  "channelAssignments": [
+    { "index": 0, "newName": "808", "roleGroup": "bass" },
+    { "index": 1, "newName": "Kick", "roleGroup": "drums" },
+    { "index": 2, "newName": "Snare", "roleGroup": "drums" },
+    { "index": 5, "newName": "Hi-Hat", "roleGroup": "drums" }
   ],
-  "preview": {
-    "groups": [
-      {
-        "roleGroup": "drums",
-        "color": "#E53E3E",
-        "channels": [
-          { "index": 1, "oldName": "Sampler", "newName": "Kick" },
-          { "index": 2, "oldName": "Channel 3", "newName": "Snare" },
-          { "index": 5, "oldName": "FPC", "newName": "Hi-Hat" }
-        ]
-      },
-      {
-        "roleGroup": "bass",
-        "color": "#3182CE",
-        "channels": [
-          { "index": 0, "oldName": "Channel 1", "newName": "808" }
-        ]
-      }
-    ],
-    "routingFixes": [
-      { "channelIndex": 5, "channelName": "Hi-Hat", "assignedInsert": 6 }
-    ]
-  }
+  "routingFixes": [
+    { "channelIndex": 5, "assignedInsert": 6 }
+  ]
 }
 ```
 
+A deterministic code layer then expands this into the full action list with color values, mixer track renames, playlist track updates, etc.
+
 **Implementation:**
 ```typescript
-const organizationPlanSchema = z.object({
-  actions: z.array(z.object({
-    type: z.string(),
-    params: z.record(z.unknown()),
+// Schema for what the AI outputs (no colors, no action list)
+const aiPlanSchema = z.object({
+  channelAssignments: z.array(z.object({
+    index: z.number(),
+    newName: z.string(),
+    roleGroup: z.enum(['drums', 'bass', 'leads', 'pads', 'fx', 'vocals', 'other']),
   })),
-  preview: z.object({
-    groups: z.array(z.object({
-      roleGroup: z.string(),
-      color: z.string(),
-      channels: z.array(z.object({
-        index: z.number(),
-        oldName: z.string(),
-        newName: z.string(),
-      })),
-    })),
-    routingFixes: z.array(z.object({
-      channelIndex: z.number(),
-      channelName: z.string(),
-      assignedInsert: z.number(),
-    })),
-  }),
+  routingFixes: z.array(z.object({
+    channelIndex: z.number(),
+    assignedInsert: z.number(),
+  })),
 });
 
-const { output: plan } = await generateText({
+const { output: aiPlan } = await generateText({
   model: anthropic('claude-haiku-4-5-20251001'),
-  output: Output.object({ schema: organizationPlanSchema }),
+  output: Output.object({ schema: aiPlanSchema }),
   system: ORGANIZATION_SYSTEM_PROMPT,
-  prompt: `Project map: ${JSON.stringify(projectMap)}. Current state: ${JSON.stringify(projectState)}. Generate a complete organization plan with naming, colors by role group, and routing fixes for unrouted channels.`,
+  prompt: `Project map: ${JSON.stringify(projectMap)}. Current state: ${JSON.stringify(projectState)}. Assign names and role groups. Fix unrouted channels.`,
 });
+
+// Deterministic expansion: code computes colors and builds typed action list
+const fullPlan = expandPlan(aiPlan, projectState);
 ```
+
+**Typed action schema (used internally after expansion):**
+```typescript
+const actionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('rename_channel'), params: z.object({ index: z.number(), name: z.string() }) }),
+  z.object({ type: z.literal('set_channel_color'), params: z.object({ index: z.number(), color: z.number() }) }),
+  z.object({ type: z.literal('set_channel_insert'), params: z.object({ index: z.number(), insert: z.number() }) }),
+  z.object({ type: z.literal('rename_mixer_track'), params: z.object({ index: z.number(), name: z.string() }) }),
+  z.object({ type: z.literal('set_mixer_track_color'), params: z.object({ index: z.number(), color: z.number() }) }),
+  z.object({ type: z.literal('rename_playlist_track'), params: z.object({ index: z.number(), name: z.string() }) }),
+  z.object({ type: z.literal('set_playlist_track_color'), params: z.object({ index: z.number(), color: z.number() }) }),
+  z.object({ type: z.literal('group_playlist_tracks'), params: z.object({ index: z.number(), count: z.number() }) }),
+  z.object({ type: z.literal('rename_pattern'), params: z.object({ index: z.number(), name: z.string() }) }),
+  z.object({ type: z.literal('set_pattern_color'), params: z.object({ index: z.number(), color: z.number() }) }),
+]);
+```
+
+### Preview Adjustment Mechanism
+
+When the user requests changes to the preview (e.g., "move channel 4 to pads"):
+
+1. A new `generateText` call is made with:
+   - The current AI plan (`channelAssignments` + `routingFixes`)
+   - The user's feedback as a text amendment
+   - Same `aiPlanSchema` output constraint
+2. The AI returns an updated plan — full replacement, not a diff
+3. The code layer re-expands into actions with updated colors
+4. New preview is shown
+
+```typescript
+const { output: adjustedPlan } = await generateText({
+  model: anthropic('claude-haiku-4-5-20251001'),
+  output: Output.object({ schema: aiPlanSchema }),
+  system: ORGANIZATION_SYSTEM_PROMPT,
+  prompt: `Current plan: ${JSON.stringify(aiPlan)}. User feedback: "${userFeedback}". Update the plan accordingly. Return the full updated plan.`,
+});
+
+const updatedFullPlan = expandPlan(adjustedPlan, projectState);
+```
+
+This is cheap (~1K tokens per adjustment round) and stateless — no conversation history needed.
 
 ### Stage 3: Execution (No AI)
 
@@ -266,21 +281,57 @@ The AI assigns roles. The code maps roles to colors. The AI never picks hex valu
 
 ---
 
-## Reused Commands from fl-bridge
+## Available fl-bridge Commands
 
-All existing commands are carried forward unchanged:
+All existing fl-bridge commands are carried forward unchanged. The Organization Agent uses a subset.
 
-**Channel Rack:** `rename_channel`, `set_channel_color`, `set_channel_volume`, `set_channel_pan`, `set_channel_enabled`, `set_channel_insert`
+**Used by Organization Agent:**
+- `get_project_state` — analysis entry point
+- `rename_channel`, `set_channel_color`, `set_channel_insert` — channel operations
+- `rename_mixer_track`, `set_mixer_track_color` — mixer operations
+- `rename_playlist_track`, `set_playlist_track_color`, `group_playlist_tracks` — playlist operations
+- `rename_pattern`, `set_pattern_color` — pattern operations
 
-**Mixer:** `rename_mixer_track`, `set_mixer_track_color`, `set_mixer_volume`, `set_mixer_pan`, `set_mixer_routing`, `set_mixer_eq`
+**Available but not used by Organization Agent (v1):**
+- `set_bpm`, `set_pitch` — transport controls, not relevant to organization
+- `set_channel_volume`, `set_channel_pan`, `set_channel_enabled` — channel audio, not visual organization
+- `set_mixer_volume`, `set_mixer_pan`, `set_mixer_routing`, `set_mixer_eq` — deeper mixer work, deferred
+- `add_midi_notes` — not organizing notes, just reading them
 
-**Playlist:** `rename_playlist_track`, `set_playlist_track_color`, `group_playlist_tracks`
+**Not available yet (needed for new project scaffolding):**
+- `create_channel` — required to add channels for new project templates. Without this, new project scaffolding can only rename/recolor the default channels FL Studio creates on startup. This command needs to be implemented in the FL script.
 
-**Patterns:** `rename_pattern`, `set_pattern_color`
+---
 
-**State:** `get_project_state`
+## Error Handling
 
-**Not used in v1:** `set_bpm`, `set_pitch`, `add_midi_notes`, `set_channel_enabled`, `set_mixer_volume`, `set_mixer_pan`, `set_mixer_routing`, `set_mixer_eq`
+### Partial Execution Failure
+
+If a command fails mid-execution (e.g., FL Studio rejects a rename):
+- Log the failed action and continue with remaining actions
+- After execution, report to the user: "Applied 28/30 changes. Failed: rename_channel(index: 5) — channel index out of range"
+- No automatic rollback — partial organization is better than none, and all changes are individually reversible
+
+### Stale State
+
+The project may change between analysis and execution (user modifies something in FL Studio during the preview). Before execution:
+- Re-fetch `get_project_state` and compare channel count against the plan
+- If channel count changed, warn the user and suggest re-analyzing
+- If channel count matches, proceed (minor changes like volume tweaks won't affect organization)
+
+### Empty MIDI Data
+
+If `get_pattern_notes` returns zero notes for a channel:
+- The Analysis Agent falls back to plugin name and channel name for inference
+- Marks confidence as "low" in the Project Map
+- This is expected for empty channels or sample-based instruments with no MIDI
+
+### FL Studio Bridge Disconnection
+
+If the WebSocket connection to the plugin drops:
+- Halt execution immediately
+- Report which actions were completed and which remain
+- User can retry after reconnecting
 
 ---
 
@@ -353,10 +404,11 @@ User: "I'm starting a trap beat"
 ### Preview Adjustment Flow
 
 When the user requests changes to the preview:
-1. Their feedback is sent back to the Organization Agent
-2. The agent regenerates the plan with adjustments
-3. New preview is shown
-4. Repeat until user approves
+1. A new `generateText` call is made with the current plan + user feedback (see Stage 2 adjustment mechanism)
+2. The AI returns a full updated plan (not a diff)
+3. Code re-expands with updated colors
+4. New preview is shown
+5. Repeat until user approves
 
 ---
 
@@ -377,7 +429,7 @@ For new project scaffolding, only the Organization stage runs — even cheaper.
 
 ## Key Design Decisions
 
-1. **Two-stage pipeline** — separates understanding (expensive, reasoning-heavy) from planning (cheap, mechanical). The Project Map is a clean interface between them.
+1. **Three-stage pipeline (two AI, one deterministic)** — separates understanding (expensive, reasoning-heavy) from planning (cheap, mechanical) from execution (no AI). The Project Map is a clean interface between stages 1 and 2.
 
 2. **Deterministic colors** — the AI assigns roles, code assigns colors. Prevents random hex values and ensures visual consistency.
 
