@@ -15,7 +15,20 @@ export type DawActionType =
   | "rename_track"
   | "play"
   | "stop"
-  | "record";
+  | "record"
+  // Organization actions
+  | "get_project_state"
+  | "get_pattern_notes"
+  | "rename_channel"
+  | "set_channel_color"
+  | "set_channel_insert"
+  | "rename_mixer_track"
+  | "set_mixer_track_color"
+  | "rename_playlist_track"
+  | "set_playlist_track_color"
+  | "group_playlist_tracks"
+  | "rename_pattern"
+  | "set_pattern_color";
 
 export interface SetBpmAction {
   action: "set_bpm";
