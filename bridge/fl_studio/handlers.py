@@ -3,6 +3,8 @@
 import logging
 from typing import Any
 
+from bridge.fl_studio.handlers_organize import ORGANIZE_HANDLERS
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,3 +117,7 @@ def register_fl_handlers(router) -> None:
     router.register("set_track_mute", handle_set_track_mute)
     router.register("set_track_solo", handle_set_track_solo)
     router.register("rename_track", handle_rename_track)
+
+    # Organization handlers
+    for action_name, handler in ORGANIZE_HANDLERS.items():
+        router.register(action_name, handler)
