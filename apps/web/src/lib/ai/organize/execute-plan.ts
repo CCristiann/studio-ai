@@ -1,5 +1,5 @@
 import { relay, RelayError } from "@/lib/relay";
-import type { OrganizationPlan, OrganizeAction, EnhancedProjectState } from "@repo/types";
+import type { OrganizationPlan, OrganizeAction, EnhancedProjectState } from "@studio-ai/types";
 
 export interface ExecutionResult {
   totalActions: number;

@@ -1,4 +1,4 @@
-import type { RoleGroup } from "@repo/types";
+import type { RoleGroup } from "@studio-ai/types";
 
 interface RoleColor {
   base: [number, number, number]; // [R, G, B]

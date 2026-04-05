@@ -5,7 +5,7 @@ import type {
   PreviewGroup,
   EnhancedProjectState,
   RoleGroup,
-} from "@repo/types";
+} from "@studio-ai/types";
 import { getChannelColor, getRoleGroupHex } from "./colors";
 
 export function expandPlan(

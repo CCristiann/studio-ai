@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { aiPlanSchema } from "./types";
 import { ORGANIZATION_SYSTEM_PROMPT, SCAFFOLD_SYSTEM_PROMPT } from "./prompts";
-import type { AIPlan, ProjectMap, EnhancedProjectState } from "@repo/types";
+import type { AIPlan, ProjectMap, EnhancedProjectState } from "@studio-ai/types";
 
 export async function runOrganization(
   projectMap: ProjectMap,

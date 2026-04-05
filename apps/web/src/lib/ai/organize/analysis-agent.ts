@@ -4,7 +4,7 @@ import { z } from "zod";
 import { relay } from "@/lib/relay";
 import { projectMapSchema } from "./types";
 import { ANALYSIS_SYSTEM_PROMPT } from "./prompts";
-import type { ProjectMap, EnhancedProjectState } from "@repo/types";
+import type { ProjectMap, EnhancedProjectState } from "@studio-ai/types";
 
 export async function runAnalysis(userId: string): Promise<{
   projectMap: ProjectMap;
