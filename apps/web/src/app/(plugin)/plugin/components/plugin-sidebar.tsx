@@ -51,11 +51,13 @@ export function PluginSidebar({
   onPanelChange,
   onSignOut,
   connectionStatus,
+  panelContent,
 }: {
   activePanel: PanelId;
   onPanelChange: (panel: PanelId) => void;
   onSignOut: () => void;
   connectionStatus: "connected" | "partial" | "disconnected";
+  panelContent: React.ReactNode;
 }) {
   const { toggleSidebar, state } = useSidebar();
 
@@ -118,6 +120,20 @@ export function PluginSidebar({
               {topItems.map(renderItem)}
             </SidebarMenu>
           </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Panel content — hidden when collapsed to icon mode */}
+        <SidebarGroup className="group-data-[collapsible=icon]:hidden flex-1 overflow-y-auto border-l border-white/[0.04]">
+          <div className="px-4 py-3.5 border-b border-white/[0.04]">
+            <div className="text-[13px] font-semibold text-[#e5e5e5] tracking-tight">
+              {activePanel === "chat" && "Chats"}
+              {activePanel === "connection" && "Connection"}
+              {activePanel === "presets" && "Quick Actions"}
+              {activePanel === "settings" && "Settings"}
+              {activePanel === "help" && "Help"}
+            </div>
+          </div>
+          {panelContent}
         </SidebarGroup>
       </SidebarContent>
 
