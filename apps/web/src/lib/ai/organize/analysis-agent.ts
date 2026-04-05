@@ -1,5 +1,5 @@
 import { ToolLoopAgent, tool, Output, stepCountIs } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { relay } from "@/lib/relay";
 import { projectMapSchema } from "./types";
@@ -13,7 +13,7 @@ export async function runAnalysis(userId: string): Promise<{
   let capturedState: EnhancedProjectState | null = null;
 
   const agent = new ToolLoopAgent({
-    model: anthropic("claude-sonnet-4-5-20250514"),
+    model: google("gemini-2.5-flash"),
     instructions: ANALYSIS_SYSTEM_PROMPT,
     tools: {
       get_project_state: tool({

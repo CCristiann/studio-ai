@@ -1,5 +1,5 @@
 import { generateText, Output } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { aiPlanSchema } from "./types";
 import { ORGANIZATION_SYSTEM_PROMPT, SCAFFOLD_SYSTEM_PROMPT } from "./prompts";
 import type { AIPlan, ProjectMap, EnhancedProjectState } from "@studio-ai/types";
@@ -9,7 +9,7 @@ export async function runOrganization(
   projectState: EnhancedProjectState,
 ): Promise<AIPlan> {
   const { output } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
+    model: google("gemini-2.5-flash"),
     output: Output.object({ schema: aiPlanSchema }),
     system: ORGANIZATION_SYSTEM_PROMPT,
     prompt: `Project map:\n${JSON.stringify(projectMap, null, 2)}\n\nCurrent project state (${projectState.channels.length} channels, ${projectState.mixer_tracks.length} mixer tracks):\n${JSON.stringify({ channels: projectState.channels, mixer_tracks: projectState.mixer_tracks }, null, 2)}\n\nAssign names and role groups for every channel. Fix any unrouted channels.`,
@@ -24,7 +24,7 @@ export async function runOrganization(
 
 export async function runScaffold(genreDescription: string): Promise<AIPlan> {
   const { output } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
+    model: google("gemini-2.5-flash"),
     output: Output.object({ schema: aiPlanSchema }),
     system: SCAFFOLD_SYSTEM_PROMPT,
     prompt: `Create a project template for: ${genreDescription}\n\nGenerate channelAssignments starting from index 0. Leave routingFixes empty (new projects have no existing routing to fix — channels will be auto-routed by index).`,
@@ -42,7 +42,7 @@ export async function adjustPlan(
   userFeedback: string,
 ): Promise<AIPlan> {
   const { output } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
+    model: google("gemini-2.5-flash"),
     output: Output.object({ schema: aiPlanSchema }),
     system: ORGANIZATION_SYSTEM_PROMPT,
     prompt: `Current plan:\n${JSON.stringify(currentPlan, null, 2)}\n\nUser feedback: "${userFeedback}"\n\nUpdate the plan based on the feedback. Return the complete updated plan (all channels, not just changed ones).`,
