@@ -220,42 +220,45 @@ Always present the preview clearly to the user before applying changes. Format t
       }),
 
       scaffold_project: tool({
-        description: "Set up a new FL Studio project template based on a genre or style. Creates named, color-coded channels with proper routing. Use when the user says they're starting a new beat/track and mentions a genre or style (e.g., 'start a trap beat', 'new lo-fi project', 'set up a house track').",
+        description: "Set up a new FL Studio project template based on a genre or style. Renames and color-codes the existing channels in the project to match the genre. Note: FL Studio cannot add channels programmatically, so the template is limited to the number of channels already in the project. Use when the user says they're starting a new beat/track and mentions a genre or style.",
         inputSchema: z.object({
           genre: z.string().describe("Genre or style description, e.g. 'trap beat', 'lo-fi hip hop', 'dark drill with 808s'"),
           confirm: z.boolean().default(false).describe("Set to true to apply the template after previewing."),
         }),
         execute: async (input) => {
           try {
-            const aiPlan = await runScaffold(input.genre);
+            // Read the actual project state to know how many channels exist
+            const stateResult = await relay(userId, "get_project_state", {});
+            if (!stateResult.success) {
+              return { success: false, error: "Could not read project state" };
+            }
+            const projectState = stateResult.data as EnhancedProjectState;
+            const channelCount = projectState.channels.length;
 
-            // Build synthetic empty state for expansion
-            const emptyState: EnhancedProjectState = {
-              bpm: 140,
-              project_name: "New Project",
-              channels: aiPlan.channelAssignments.map((a, i) => ({
-                index: i, name: `Channel ${i + 1}`, plugin: "Sampler",
-                color: 0, volume: 0.8, pan: 0, enabled: true, insert: i + 1,
-              })),
-              mixer_tracks: aiPlan.channelAssignments.map((a, i) => ({
-                index: i + 1, name: `Insert ${i + 1}`, color: 0,
-                volume: 0.8, pan: 0, muted: false,
-              })),
-              playlist_tracks: [],
-              patterns: aiPlan.channelAssignments.map((a, i) => ({
-                index: i + 1, name: `Pattern ${i + 1}`, color: 0,
-              })),
+            // Generate a template, then trim to fit available channels
+            const aiPlan = await runScaffold(input.genre);
+            const trimmedPlan = {
+              ...aiPlan,
+              channelAssignments: aiPlan.channelAssignments
+                .slice(0, channelCount)
+                .map((a, i) => ({ ...a, index: projectState.channels[i].index })),
             };
 
-            const fullPlan = expandPlan(aiPlan, emptyState);
+            const fullPlan = expandPlan(trimmedPlan, projectState);
 
             if (!input.confirm) {
+              const skipped = aiPlan.channelAssignments.length - trimmedPlan.channelAssignments.length;
               return {
                 success: true,
                 status: "preview",
                 genre: input.genre,
                 preview: fullPlan.preview,
                 actionCount: fullPlan.actions.length,
+                channelsAvailable: channelCount,
+                channelsRequested: aiPlan.channelAssignments.length,
+                ...(skipped > 0 && {
+                  note: `Your project has ${channelCount} channels but the template needs ${aiPlan.channelAssignments.length}. ${skipped} channels were skipped. Add more channels in FL Studio first if you want the full template.`,
+                }),
               };
             } else {
               const result = await executePlan(userId, fullPlan);
