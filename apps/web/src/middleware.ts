@@ -2,10 +2,13 @@ import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 // Routes accessible only from the plugin WebView
-const pluginPaths = ["/plugin", "/auth/device"];
+const pluginPaths = ["/plugin"];
+
+// Routes that require auth but are accessed from the system browser (not WebView)
+const deviceAuthPaths = ["/link"];
 
 // Routes that never require auth
-const publicPaths = ["/", "/login", "/api/auth", "/api/stripe/webhook"];
+const publicPaths = ["/", "/login", "/api/auth", "/api/ai", "/api/plugin", "/api/stripe/webhook"];
 
 export default auth((req) => {
   const { pathname, searchParams } = req.nextUrl;
