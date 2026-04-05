@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,11 @@ export function OnboardingWizard({
   token: string;
 }) {
   const [step, setStep] = useState(0);
+
+  // Reset to first step when wizard reopens
+  useEffect(() => {
+    if (open) setStep(0);
+  }, [open]);
 
   const handleNext = async () => {
     if (step < steps.length - 1) {

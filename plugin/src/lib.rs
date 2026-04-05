@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 mod ipc;
+mod pipe_ipc;
 mod state;
 mod websocket_bridge;
 mod websocket_cloud;
@@ -23,6 +24,11 @@ struct StudioAiParams {}
 
 impl Default for StudioAiPlugin {
     fn default() -> Self {
+        // Set up pipe IPC early so fds 20/21 are ready before FL loads MIDI script
+        if let Err(e) = pipe_ipc::setup_pipes() {
+            log::error!("Failed to initialize pipe IPC: {}", e);
+        }
+
         Self {
             params: Arc::new(StudioAiParams {}),
             shared_state: create_shared_state(),
@@ -81,7 +87,7 @@ impl Plugin for StudioAiPlugin {
 
         let editor = WebViewEditor::new(
             HTMLSource::URL("http://localhost:3000?context=plugin"),
-            (900, 700),
+            (1100, 800),
         )
         .with_background_color((18, 18, 18, 255))
         .with_developer_mode(true)
@@ -101,6 +107,16 @@ impl Plugin for StudioAiPlugin {
                                 // Start WS threads on first token, once
                                 if !ws_started.swap(true, Ordering::SeqCst) {
                                     start_websockets(shared_state.clone());
+                                }
+                            }
+                        }
+                        "open_browser" => {
+                            if let Some(url) = value
+                                .get("url")
+                                .and_then(|u| u.as_str())
+                            {
+                                if url.starts_with("http://") || url.starts_with("https://") {
+                                    let _ = open::that(url);
                                 }
                             }
                         }

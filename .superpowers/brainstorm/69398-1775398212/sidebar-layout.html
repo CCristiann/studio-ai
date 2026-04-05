@@ -1,0 +1,50 @@
+<h2>Sidebar layout for 1100×800 plugin</h2>
+<p class="subtitle">Space is limited inside a DAW. Which approach fits best?</p>
+
+<div class="options">
+  <div class="option" data-choice="icon-rail" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Icon Rail (collapsed)</h3>
+      <p>Narrow strip (~48-56px) with icon-only buttons. Always visible. Tooltips on hover. Think VS Code activity bar or Discord. Maximizes chat space.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="icon-expandable" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Icon Rail + Expandable Panel</h3>
+      <p>Same icon rail, but clicking an icon slides open a panel (like VS Code sidebar). Chat shrinks to accommodate. Click again to collapse back to icons-only.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="top-tabs" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Top Tab Bar</h3>
+      <p>Horizontal tabs along the top — Chat | Status | Presets | Settings. Full width for each view. Simple but uses vertical space (~40px).</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="bottom-nav" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Bottom Navigation Bar</h3>
+      <p>Mobile-style bottom bar with icons + labels. 5 items max. Leaves top clean for content. Common in embedded UIs.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Size context</h3>
+  <div class="mockup">
+    <div class="mockup-header">Plugin WebView — 1100 × 800px</div>
+    <div class="mockup-body" style="height:200px;display:flex;align-items:center;justify-content:center;color:#888;font-size:14px;">
+      <div style="text-align:center">
+        <div style="font-size:24px;margin-bottom:8px">1100 × 800</div>
+        <div>Roughly a 14" laptop screen at 50% width</div>
+        <div style="margin-top:8px;font-size:12px;color:#666">Every pixel matters — sidebar should be minimal</div>
+      </div>
+    </div>
+  </div>
+</div>

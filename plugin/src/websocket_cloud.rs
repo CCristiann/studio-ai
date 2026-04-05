@@ -1,10 +1,15 @@
 //! Thread A: Cloud WebSocket client.
+//!
+//! Connects to FastAPI relay service, authenticates with JWT,
+//! receives action messages, relays them to FL Studio via pipe IPC,
+//! and sends responses back.
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use crate::pipe_ipc;
 use crate::state::SharedState;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -58,6 +63,9 @@ pub async fn run(shared_state: SharedState) {
             continue;
         }
 
+        // Wait briefly for server to close if auth fails (100ms)
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         {
             let mut state = shared_state.lock().unwrap();
             state.cloud_connected = true;
@@ -90,7 +98,7 @@ pub async fn run(shared_state: SharedState) {
             }
         });
 
-        // Send loop
+        // Send loop: forward outbound messages to WebSocket
         let send_handle = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 if write.send(Message::Text(msg)).await.is_err() {
@@ -99,10 +107,9 @@ pub async fn run(shared_state: SharedState) {
             }
         });
 
-        // Receive loop
-        let recv_state = shared_state.clone();
+        // Receive loop: handle incoming messages from cloud
+        let response_tx = tx.clone();
         let recv_handle = tokio::spawn(async move {
-            let _ = recv_state; // held for potential future use
             while let Some(Ok(msg)) = read.next().await {
                 match msg {
                     Message::Text(text) => {
@@ -110,7 +117,16 @@ pub async fn run(shared_state: SharedState) {
                             let msg_type = parsed.get("type").and_then(|t| t.as_str());
                             match msg_type {
                                 Some("action") => {
-                                    log::info!("Received action from cloud: {}", text);
+                                    log::info!("Received action from cloud, relaying to FL Studio");
+                                    let tx = response_tx.clone();
+                                    let action_text = text.clone();
+                                    // Spawn relay task so we don't block the receive loop
+                                    tokio::spawn(async move {
+                                        let response = relay_action_to_fl(&action_text).await;
+                                        if tx.send(response).is_err() {
+                                            log::error!("Failed to send response to cloud WS");
+                                        }
+                                    });
                                 }
                                 Some("error") => {
                                     log::warn!("Error from cloud: {}", text);
@@ -147,4 +163,88 @@ pub async fn run(shared_state: SharedState) {
         sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
+}
+
+/// Relay an action message to FL Studio via pipe IPC and build a response.
+async fn relay_action_to_fl(action_json: &str) -> String {
+    let parsed: serde_json::Value = match serde_json::from_str(action_json) {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to parse action: {}", e);
+            return make_error_response("unknown", "DAW_ERROR", &format!("Parse error: {}", e));
+        }
+    };
+
+    let msg_id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+    if !pipe_ipc::is_initialized() {
+        log::error!("Pipe IPC not initialized, cannot relay to FL Studio");
+        return make_error_response(msg_id, "BRIDGE_DISCONNECTED", "Pipe IPC not initialized");
+    }
+
+    if parsed.get("payload").is_none() {
+        return make_error_response(msg_id, "DAW_ERROR", "Missing payload in action");
+    }
+
+    // Build command for FL script with message ID for correlation
+    let fl_command = serde_json::json!({
+        "id": msg_id,
+        "action": parsed["payload"].get("action").and_then(|a| a.as_str()).unwrap_or(""),
+        "params": parsed["payload"].get("params").unwrap_or(&serde_json::Value::Object(Default::default())),
+    });
+
+    match pipe_ipc::relay_to_fl_async(fl_command.to_string()).await {
+        Ok(response_str) => {
+            // Parse FL script response and wrap in envelope
+            match serde_json::from_str::<serde_json::Value>(&response_str) {
+                Ok(fl_response) => {
+                    let success = fl_response.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                    let response = serde_json::json!({
+                        "id": msg_id,
+                        "type": "response",
+                        "payload": {
+                            "success": success,
+                            "data": fl_response.get("data").unwrap_or(&serde_json::Value::Null),
+                        }
+                    });
+                    response.to_string()
+                }
+                Err(_) => {
+                    // FL script returned non-JSON, wrap as-is
+                    let response = serde_json::json!({
+                        "id": msg_id,
+                        "type": "response",
+                        "payload": {
+                            "success": true,
+                            "data": response_str,
+                        }
+                    });
+                    response.to_string()
+                }
+            }
+        }
+        Err(e) => {
+            let code = if e.kind() == std::io::ErrorKind::TimedOut {
+                "DAW_TIMEOUT"
+            } else if e.kind() == std::io::ErrorKind::BrokenPipe {
+                "BRIDGE_DISCONNECTED"
+            } else {
+                "DAW_ERROR"
+            };
+            log::error!("Pipe IPC relay failed: {}", e);
+            make_error_response(msg_id, code, &e.to_string())
+        }
+    }
+}
+
+fn make_error_response(id: &str, code: &str, message: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "type": "error",
+        "payload": {
+            "code": code,
+            "message": message,
+        }
+    })
+    .to_string()
 }

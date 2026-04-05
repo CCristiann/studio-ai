@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"/Users/cristiancirje/.cargo/bin:$PATH\" && jq -r '.tool_input.file_path' | { read -r f; echo \"$f\" | grep -qE '/plugin/(src/.*\\.rs|Cargo\\.toml)$' && cd /Users/cristiancirje/Desktop/Dev/studio-ai/plugin && cargo build --release 2>&1 | tail -2 && cp target/release/libstudio_ai_plugin.dylib \"/Library/Audio/Plug-Ins/VST3/Studio AI.vst3/Contents/MacOS/studio-ai\" && echo '{\"systemMessage\":\"Plugin built and deployed to VST3 bundle\"}'; }",
+            "timeout": 120,
+            "statusMessage": "Building and deploying Rust plugin..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; echo \"$f\" | grep -qE '/bridge/fl_studio/device_studio_ai\\.py$' && cp \"$f\" \"$HOME/Documents/Image-Line/FL Studio/Settings/Hardware/Studio AI/device_studio_ai.py\" && echo '{\"systemMessage\":\"FL Studio script deployed to Hardware folder\"}'; }",
+            "timeout": 10,
+            "statusMessage": "Deploying FL Studio script..."
+          }
+        ]
+      }
+    ]
+  }
+}

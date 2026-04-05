@@ -15,11 +15,6 @@ import { SettingsPanel } from "./components/panels/settings-panel";
 import { HelpPanel } from "./components/panels/help-panel";
 import { OnboardingWizard } from "./components/onboarding-wizard";
 
-interface PluginConnectionStatus {
-  cloud: { connected: boolean; latency_ms?: number };
-  bridge: { connected: boolean; daw?: string; project?: string };
-}
-
 export function PluginDashboard({
   token,
   onAuthError,
@@ -33,11 +28,10 @@ export function PluginDashboard({
   const [connectionStatus, setConnectionStatus] = useState<
     "connected" | "partial" | "disconnected"
   >("disconnected");
-  const [bridgeInfo, setBridgeInfo] = useState<{
-    daw?: string;
-    project?: string;
-    connected: boolean;
-  }>({ connected: false });
+  const [pluginStatus, setPluginStatus] = useState<{
+    cloud: { connected: boolean; latency_ms?: number };
+    bridge: { connected: boolean; daw?: string; project?: string };
+  } | null>(null);
 
   // Token expiry for settings panel
   const tokenExpiry = useMemo(() => {
@@ -110,16 +104,26 @@ export function PluginDashboard({
       .catch(() => {});
   }, [token]);
 
-  // Listen for connection status from plugin
+  // Request connection status from plugin
+  const requestConnectionStatus = useCallback(() => {
+    if (typeof window.sendToPlugin === "function") {
+      window.sendToPlugin({ type: "getConnectionStatus" });
+    } else {
+      // Dev fallback: mock data
+      setPluginStatus({
+        cloud: { connected: true, latency_ms: 42 },
+        bridge: { connected: false },
+      });
+    }
+  }, []);
+
+  // Single IPC handler — dashboard owns all plugin messages
   useEffect(() => {
-    const handler = (msg: { type: string; payload?: Record<string, unknown> }) => {
+    window.onPluginMessage = (msg) => {
       if (msg.type === "connectionStatus" && msg.payload) {
-        const s = msg.payload as unknown as PluginConnectionStatus;
-        setBridgeInfo({
-          connected: s.bridge.connected,
-          daw: s.bridge.daw,
-          project: s.bridge.project,
-        });
+        const s = msg.payload as unknown as typeof pluginStatus;
+        if (!s) return;
+        setPluginStatus(s);
         if (s.cloud.connected && s.bridge.connected) {
           setConnectionStatus("connected");
         } else if (s.cloud.connected || s.bridge.connected) {
@@ -129,8 +133,12 @@ export function PluginDashboard({
         }
       }
     };
-    window.onPluginMessage = handler;
-  }, []);
+
+    // Initial request + polling
+    requestConnectionStatus();
+    const interval = setInterval(requestConnectionStatus, 5000);
+    return () => clearInterval(interval);
+  }, [requestConnectionStatus]);
 
   // Render expanded panel content
   const panelContent: Record<PanelId, React.ReactNode> = {
@@ -144,7 +152,7 @@ export function PluginDashboard({
         </div>
       </div>
     ),
-    connection: <ConnectionPanel />,
+    connection: <ConnectionPanel status={pluginStatus} onRefresh={requestConnectionStatus} />,
     presets: <PresetsPanel token={token} onSendPrompt={handleSendPrompt} />,
     settings: (
       <SettingsPanel
@@ -176,9 +184,9 @@ export function PluginDashboard({
 
         <SidebarInset className="bg-[#111] flex flex-col min-w-0">
           <PluginTopbar
-            projectName={bridgeInfo.project}
-            dawName={bridgeInfo.daw}
-            isConnected={bridgeInfo.connected}
+            projectName={pluginStatus?.bridge.project}
+            dawName={pluginStatus?.bridge.daw}
+            isConnected={pluginStatus?.bridge.connected ?? false}
           />
           <ChatMessages
             messages={messages}

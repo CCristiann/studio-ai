@@ -1,0 +1,76 @@
+<h2>Which features belong in the plugin sidebar?</h2>
+<p class="subtitle">Select all that feel right for v1. You can click multiple options.</p>
+
+<div class="options" data-multiselect>
+  <div class="option" data-choice="chat" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>AI Chat (main view)</h3>
+      <p>Already exists. The core experience — talk to AI to control your DAW. This is the default screen.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="connection" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Connection Status</h3>
+      <p>Live indicator showing plugin ↔ cloud ↔ DAW bridge status. See if your FL Studio bridge is connected, cloud relay is online, latency info.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="project" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>Project Info</h3>
+      <p>Current DAW project snapshot — BPM, track list, playing state. Quick read-only view of what the AI "sees" about your session.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="mixer" onclick="toggleSelect(this)">
+    <div class="letter">4</div>
+    <div class="content">
+      <h3>Quick Mixer Controls</h3>
+      <p>Visual sliders/knobs for track volume, pan, mute, solo — a mini mixer you can tweak without typing commands.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="history" onclick="toggleSelect(this)">
+    <div class="letter">5</div>
+    <div class="content">
+      <h3>Chat History / Sessions</h3>
+      <p>Browse past conversations. Resume previous sessions. See what commands were run before.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="presets" onclick="toggleSelect(this)">
+    <div class="letter">6</div>
+    <div class="content">
+      <h3>AI Presets / Quick Actions</h3>
+      <p>Saved prompt templates — "Set up a lo-fi beat", "Add sidechain compression", "Analyze my mix". One-click commands.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="settings" onclick="toggleSelect(this)">
+    <div class="letter">7</div>
+    <div class="content">
+      <h3>Settings</h3>
+      <p>Plugin preferences — theme, AI model selection, notification preferences, token/auth management, sign out.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="account" onclick="toggleSelect(this)">
+    <div class="letter">8</div>
+    <div class="content">
+      <h3>Account & Subscription</h3>
+      <p>Current plan (Free/Pro/Studio), usage stats, upgrade prompts. Manage billing without leaving the plugin.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="help" onclick="toggleSelect(this)">
+    <div class="letter">9</div>
+    <div class="content">
+      <h3>Help & Onboarding</h3>
+      <p>Getting started guide, what the AI can do, example commands, keyboard shortcuts, support link.</p>
+    </div>
+  </div>
+</div>

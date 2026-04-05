@@ -1,0 +1,172 @@
+<h2>Plugin Dashboard — Layout Wireframe</h2>
+<p class="subtitle">Icon rail + expandable panel + chat main area. Does this structure feel right?</p>
+
+<div class="mockup">
+  <div class="mockup-header">Studio AI Plugin — 1100 × 800 (collapsed sidebar)</div>
+  <div class="mockup-body" style="padding:0;height:420px;display:flex;background:#111;">
+
+    <!-- Icon Rail -->
+    <div style="width:52px;min-width:52px;background:#0a0a0a;border-right:1px solid #222;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;">
+      <!-- Logo -->
+      <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#fff,#888);margin-bottom:12px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#000;">S</div>
+
+      <!-- Nav items -->
+      <div style="width:36px;height:36px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:16px;" title="Chat">💬</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;" title="Connection">🔗</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;" title="Presets">⚡</div>
+
+      <!-- Spacer -->
+      <div style="flex:1"></div>
+
+      <!-- Bottom items -->
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;" title="Help">❓</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;" title="Settings">⚙️</div>
+
+      <!-- Connection dot -->
+      <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;margin-top:8px;" title="Connected"></div>
+    </div>
+
+    <!-- Main Chat Area -->
+    <div style="flex:1;display:flex;flex-direction:column;">
+      <!-- Top bar -->
+      <div style="height:44px;border-bottom:1px solid #222;display:flex;align-items:center;padding:0 16px;gap:12px;">
+        <span style="color:#fff;font-size:13px;font-weight:500;">New Chat</span>
+        <div style="flex:1"></div>
+        <span style="color:#555;font-size:11px;">FL Studio — My Project.flp</span>
+        <div style="width:24px;height:24px;border-radius:50%;background:#333;display:flex;align-items:center;justify-content:center;font-size:11px;">+</div>
+      </div>
+
+      <!-- Messages -->
+      <div style="flex:1;padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;gap:8px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#fff,#888);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#000;">AI</div>
+          <div style="background:#1a1a1a;border:1px solid #222;border-radius:12px;padding:10px 14px;max-width:80%;font-size:12px;color:#ccc;line-height:1.5;">
+            Welcome to Studio AI! I can see your FL Studio project "My Project.flp" at 140 BPM. What would you like to do?
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <div style="background:#222;border-radius:12px;padding:10px 14px;max-width:80%;font-size:12px;color:#fff;line-height:1.5;">
+            Set the BPM to 128 and add a new track called "Bass"
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#fff,#888);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#000;">AI</div>
+          <div style="max-width:80%;">
+            <div style="background:#1a1a1a;border:1px solid #222;border-radius:12px;padding:10px 14px;font-size:12px;color:#ccc;line-height:1.5;margin-bottom:6px;">
+              Done! I've made those changes:
+            </div>
+            <!-- Tool result -->
+            <div style="background:#0d1a0d;border:1px solid #1a3a1a;border-radius:8px;padding:8px 12px;font-size:11px;font-family:monospace;">
+              <div style="color:#4ade80;margin-bottom:4px;">✓ set_bpm → 128</div>
+              <div style="color:#4ade80;">✓ add_track → "Bass"</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div style="padding:12px 16px;border-top:1px solid #222;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:10px 14px;font-size:12px;color:#555;">
+            Ask Studio AI anything...
+          </div>
+          <div style="width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+            <span style="color:#000;font-size:14px;">↑</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="height:24px"></div>
+
+<div class="mockup">
+  <div class="mockup-header">Studio AI Plugin — 1100 × 800 (expanded sidebar — Presets panel)</div>
+  <div class="mockup-body" style="padding:0;height:420px;display:flex;background:#111;">
+
+    <!-- Icon Rail -->
+    <div style="width:52px;min-width:52px;background:#0a0a0a;border-right:1px solid #222;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;">
+      <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#fff,#888);margin-bottom:12px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#000;">S</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;">💬</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;">🔗</div>
+      <div style="width:36px;height:36px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:16px;">⚡</div>
+      <div style="flex:1"></div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;">❓</div>
+      <div style="width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;opacity:0.5;">⚙️</div>
+      <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;margin-top:8px;"></div>
+    </div>
+
+    <!-- Expanded Panel -->
+    <div style="width:240px;min-width:240px;background:#0f0f0f;border-right:1px solid #222;display:flex;flex-direction:column;">
+      <div style="padding:14px 16px;border-bottom:1px solid #222;">
+        <div style="font-size:13px;font-weight:600;color:#fff;">Quick Actions</div>
+        <div style="font-size:11px;color:#555;margin-top:2px;">One-click AI commands</div>
+      </div>
+      <div style="padding:8px;display:flex;flex-direction:column;gap:4px;overflow:auto;">
+        <div style="padding:10px 12px;background:#1a1a1a;border:1px solid #222;border-radius:8px;cursor:pointer;">
+          <div style="font-size:12px;color:#fff;font-weight:500;">🎵 Lo-fi Beat Setup</div>
+          <div style="font-size:10px;color:#666;margin-top:2px;">Set BPM, add drums, bass, keys</div>
+        </div>
+        <div style="padding:10px 12px;background:#1a1a1a;border:1px solid #222;border-radius:8px;cursor:pointer;">
+          <div style="font-size:12px;color:#fff;font-weight:500;">🔊 Sidechain Compress</div>
+          <div style="font-size:10px;color:#666;margin-top:2px;">Route kick to compress bass</div>
+        </div>
+        <div style="padding:10px 12px;background:#1a1a1a;border:1px solid #222;border-radius:8px;cursor:pointer;">
+          <div style="font-size:12px;color:#fff;font-weight:500;">📊 Analyze My Mix</div>
+          <div style="font-size:10px;color:#666;margin-top:2px;">Check levels, panning, frequency</div>
+        </div>
+        <div style="padding:10px 12px;background:#1a1a1a;border:1px solid #222;border-radius:8px;cursor:pointer;">
+          <div style="font-size:12px;color:#fff;font-weight:500;">🎹 Chord Progression</div>
+          <div style="font-size:10px;color:#666;margin-top:2px;">Generate chords in a key</div>
+        </div>
+        <div style="padding:10px 12px;border:1px dashed #333;border-radius:8px;cursor:pointer;text-align:center;">
+          <div style="font-size:12px;color:#555;">+ Create Custom Preset</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Chat Area (narrower) -->
+    <div style="flex:1;display:flex;flex-direction:column;">
+      <div style="height:44px;border-bottom:1px solid #222;display:flex;align-items:center;padding:0 16px;gap:12px;">
+        <span style="color:#fff;font-size:13px;font-weight:500;">New Chat</span>
+        <div style="flex:1"></div>
+        <span style="color:#555;font-size:11px;">FL Studio — My Project.flp</span>
+      </div>
+      <div style="flex:1;padding:16px;display:flex;align-items:center;justify-content:center;">
+        <div style="text-align:center;color:#444;font-size:12px;">
+          <div style="font-size:32px;margin-bottom:8px;">💬</div>
+          Chat area shrinks to fit<br/>
+          <span style="font-size:10px;color:#333;">Panel collapses when you click the icon again</span>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #222;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:10px 14px;font-size:12px;color:#555;">
+            Ask Studio AI anything...
+          </div>
+          <div style="width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
+            <span style="color:#000;font-size:14px;">↑</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>This layout works</h3>
+      <p>Icon rail + expandable panel + chat main area. Let's go with this structure.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what I want different in the terminal.</p>
+    </div>
+  </div>
+</div>

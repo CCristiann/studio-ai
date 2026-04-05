@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Internal API key shared with Next.js
     fastapi_internal_api_key: str = ""
 
+    # NextAuth secret (for validating plugin tokens signed by Next.js)
+    nextauth_secret: str = ""
+
     # Stripe
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

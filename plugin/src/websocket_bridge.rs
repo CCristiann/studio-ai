@@ -86,7 +86,7 @@ pub async fn run(shared_state: SharedState) {
             }
         });
 
-        let recv_state = shared_state.clone();
+        let _recv_state = shared_state.clone();
         let recv_handle = tokio::spawn(async move {
             while let Some(Ok(msg)) = read.next().await {
                 match msg {

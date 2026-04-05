@@ -3,6 +3,7 @@ import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { verifyPluginToken } from "@/lib/plugin-auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { relay, RelayError } from "@/lib/relay";
 
 async function getUserId(req: Request): Promise<string | null> {
@@ -21,6 +22,15 @@ export async function POST(req: Request) {
   const userId = await getUserId(req);
   if (!userId) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Rate limit: max 20 AI requests per user per minute
+  const { success } = rateLimit(`ai:${userId}`, {
+    limit: 20,
+    windowMs: 60_000,
+  });
+  if (!success) {
+    return new Response("Rate limit exceeded", { status: 429 });
   }
 
   const { messages }: { messages: UIMessage[] } = await req.json();
