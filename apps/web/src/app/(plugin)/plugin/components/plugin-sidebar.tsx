@@ -14,11 +14,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -81,23 +76,16 @@ export function PluginSidebar({
 
   const renderItem = (item: { id: PanelId; label: string; icon: typeof MessageSquare }) => (
     <SidebarMenuItem key={item.id}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <SidebarMenuButton
-            isActive={activePanel === item.id}
-            onClick={() => handleClick(item.id)}
-            className="relative"
-          >
-            <item.icon className="h-5 w-5" />
-            <span className="group-data-[collapsible=icon]:hidden">
-              {item.label}
-            </span>
-          </SidebarMenuButton>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="group-data-[state=expanded]:hidden">
+      <SidebarMenuButton
+        isActive={activePanel === item.id}
+        onClick={() => handleClick(item.id)}
+        className="relative"
+      >
+        <item.icon className="h-5 w-5" />
+        <span className="group-data-[collapsible=icon]:hidden">
           {item.label}
-        </TooltipContent>
-      </Tooltip>
+        </span>
+      </SidebarMenuButton>
     </SidebarMenuItem>
   );
 
@@ -142,8 +130,7 @@ export function PluginSidebar({
           {bottomItems.map(renderItem)}
           <SidebarMenuItem>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="h-auto py-2">
+              <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-2 hover:bg-sidebar-accent">
                   <div className="relative">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-b from-indigo-400 to-violet-500 text-xs font-bold text-white shadow-md">
                       U
@@ -155,7 +142,6 @@ export function PluginSidebar({
                   <span className="group-data-[collapsible=icon]:hidden text-sm">
                     Account
                   </span>
-                </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="end">
                 <DropdownMenuItem onClick={onSignOut}>

@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 
-export function PluginChat({ token }: { token: string }) {
+export function PluginChat({
+  token,
+  onAuthError,
+}: {
+  token: string;
+  onAuthError: () => void;
+}) {
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -16,7 +22,21 @@ export function PluginChat({ token }: { token: string }) {
       }),
     [token]
   );
-  const { messages, sendMessage, status, error } = useChat({ transport });
+  const { messages, sendMessage, status, error } = useChat({
+    transport,
+    async onError() {
+      // On any error, re-validate the token — if revoked, trigger logout
+      try {
+        const res = await fetch("/api/auth/plugin/validate", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) onAuthError();
+      } catch {
+        // Network error — don't force logout on transient failures
+      }
+    },
+  });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isLoading = status === "streaming" || status === "submitted";

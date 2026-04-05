@@ -164,7 +164,7 @@ export function PluginDashboard({
   };
 
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <SidebarProvider defaultOpen={false}>
         <PluginSidebar
           activePanel={activePanel}

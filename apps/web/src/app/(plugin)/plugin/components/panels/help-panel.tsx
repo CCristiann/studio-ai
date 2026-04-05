@@ -27,7 +27,7 @@ export function HelpPanel({
 }) {
   const openDocs = () => {
     if (typeof window.sendToPlugin === "function") {
-      window.sendToPlugin({ type: "open_browser", url: "https://studioai.dev/docs" });
+      window.sendToPlugin({ type: "open_browser", payload: { url: "https://studioai.dev/docs" } });
     } else {
       window.open("https://studioai.dev/docs", "_blank");
     }
