@@ -87,7 +87,7 @@ impl Plugin for StudioAiPlugin {
 
         let editor = WebViewEditor::new(
             HTMLSource::URL("http://localhost:3000?context=plugin"),
-            (1400, 900),
+            (1180, 830),
         )
         .with_background_color((18, 18, 18, 255))
         .with_developer_mode(true)

@@ -44,7 +44,7 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
       const linkUrl = `${origin}/link`;
 
       if (typeof window.sendToPlugin === "function") {
-        window.sendToPlugin({ type: "open_browser", payload: { url: linkUrl } });
+        window.sendToPlugin({ type: "open_browser", url: linkUrl });
       } else {
         window.open(linkUrl, "_blank");
       }
@@ -93,7 +93,7 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
   };
 
   return (
-    <div className="flex h-full items-center justify-center bg-background">
+    <div className="flex h-full w-full items-center justify-center bg-background">
       <Card className="w-full max-w-sm p-6 space-y-4">
         <div className="text-center space-y-1">
           <h1 className="text-xl font-semibold">Studio AI</h1>

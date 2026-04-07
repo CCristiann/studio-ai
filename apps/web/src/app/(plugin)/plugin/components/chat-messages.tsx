@@ -52,7 +52,7 @@ export function ChatMessages({
               className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
                 }`}
             >
-              <div className="max-w-[min(85%,420px)]">
+              <div className="max-w-2xl">
                 {message.parts.map((part, i) => {
                   if (part.type === "text") {
                     return (

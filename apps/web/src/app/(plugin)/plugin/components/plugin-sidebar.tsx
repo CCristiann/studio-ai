@@ -81,7 +81,7 @@ export function PluginSidebar({
         onClick={() => handleClick(item.id)}
         className="relative"
       >
-        <item.icon className="h-5 w-5" />
+        <item.icon className="w-5 h-5" />
         <span className="group-data-[collapsible=icon]:hidden">
           {item.label}
         </span>
@@ -93,7 +93,7 @@ export function PluginSidebar({
     <Sidebar
       collapsible="icon"
       variant="sidebar"
-      className="border-r-0 bg-[#080808] [--sidebar-width:320px] [--sidebar-width-icon:60px]"
+      className="border-r-0 bg-[#080808]"
     >
       <SidebarHeader className="flex items-center justify-center py-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-b from-neutral-200 to-neutral-400 text-[15px] font-extrabold text-black shadow-md">
@@ -104,7 +104,7 @@ export function PluginSidebar({
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="flex justify-center group-data-[collapsible=icon]:items-center">
               {topItems.map(renderItem)}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -126,22 +126,22 @@ export function PluginSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarMenu>
+        <SidebarMenu className="flex justify-center group-data-[collapsible=icon]:items-center">
           {bottomItems.map(renderItem)}
           <SidebarMenuItem>
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-2 hover:bg-sidebar-accent">
-                  <div className="relative">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-b from-indigo-400 to-violet-500 text-xs font-bold text-white shadow-md">
-                      U
-                    </div>
-                    <div
-                      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#080808] ${statusColor}`}
-                    />
+              <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md p-2 group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 hover:bg-sidebar-accent">
+                <div className="relative shrink-0">
+                  <div className="flex size-5 items-center justify-center rounded-full bg-gradient-to-b from-indigo-400 to-violet-500 text-[8px] font-bold text-white shadow-md">
+                    U
                   </div>
-                  <span className="group-data-[collapsible=icon]:hidden text-sm">
-                    Account
-                  </span>
+                  <div
+                    className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-[#080808] ${statusColor}`}
+                  />
+                </div>
+                <span className="group-data-[collapsible=icon]:hidden text-sm">
+                  Account
+                </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="end">
                 <DropdownMenuItem onClick={onSignOut}>
@@ -155,6 +155,6 @@ export function PluginSidebar({
       </SidebarFooter>
 
       <SidebarRail />
-    </Sidebar>
+    </Sidebar >
   );
 }

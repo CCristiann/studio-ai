@@ -28,7 +28,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="px-5 pb-5 pt-3">
+    <div className="px-5 pb-5 pt-3 max-w-2xl mx-auto w-full">
       <div className="flex items-end gap-2.5 rounded-3xl border border-white/5 bg-white/[0.03] px-5 py-1.5 transition-colors hover:border-white/10 focus-within:border-white/10">
         <textarea
           ref={inputRef}
@@ -37,7 +37,7 @@ export function ChatInput({
           onKeyDown={handleKeyDown}
           placeholder="Ask Studio AI anything..."
           disabled={disabled}
-          rows={1}
+          rows={4}
           className="flex-1 resize-none bg-transparent py-2.5 text-[13px] leading-relaxed text-foreground placeholder:text-[#444] focus:outline-none disabled:opacity-50"
         />
         <button

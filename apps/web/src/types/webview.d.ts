@@ -5,7 +5,7 @@ interface PluginConnectionStatus {
 
 interface PluginMessage {
   type: string;
-  payload?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 interface Window {

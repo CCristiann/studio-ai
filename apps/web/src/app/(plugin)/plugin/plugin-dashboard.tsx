@@ -173,7 +173,7 @@ export function PluginDashboard({
 
   return (
     <TooltipProvider delay={0}>
-      <SidebarProvider defaultOpen={false}>
+      <SidebarProvider defaultOpen={false} style={{ "--sidebar-width": "320px", "--sidebar-width-icon": "60px" } as React.CSSProperties}>
         <PluginSidebar
           activePanel={activePanel}
           onPanelChange={setActivePanel}
