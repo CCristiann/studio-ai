@@ -15,6 +15,8 @@ NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_SRC="$ROOT_DIR/bridge/fl_studio/device_studio_ai.py"
+HANDLERS_SRC="$ROOT_DIR/bridge/fl_studio/handlers_organize.py"
+TRANSPORT_SRC="$ROOT_DIR/bridge/fl_studio/ipc_transport.py"
 
 # Determine FL Studio Hardware directory
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -29,20 +31,32 @@ fi
 DEST_DIR="$FL_HARDWARE_DIR/Studio AI"
 DEST_FILE="$DEST_DIR/device_studio_ai.py"
 
-# Verify source exists
+# Verify sources exist
 if [ ! -f "$SCRIPT_SRC" ]; then
     echo -e "${RED}Source script not found: $SCRIPT_SRC${NC}"
+    exit 1
+fi
+if [ ! -f "$HANDLERS_SRC" ]; then
+    echo -e "${RED}Handlers script not found: $HANDLERS_SRC${NC}"
+    exit 1
+fi
+if [ ! -f "$TRANSPORT_SRC" ]; then
+    echo -e "${RED}Transport module not found: $TRANSPORT_SRC${NC}"
     exit 1
 fi
 
 # Create destination directory
 mkdir -p "$DEST_DIR"
 
-# Copy the script
+# Copy the scripts
 cp "$SCRIPT_SRC" "$DEST_FILE"
+cp "$HANDLERS_SRC" "$DEST_DIR/handlers_organize.py"
+cp "$TRANSPORT_SRC" "$DEST_DIR/ipc_transport.py"
 
-echo -e "${GREEN}FL Studio MIDI script installed to:${NC}"
+echo -e "${GREEN}FL Studio MIDI scripts installed to:${NC}"
 echo "  $DEST_FILE"
+echo "  $DEST_DIR/handlers_organize.py"
+echo "  $DEST_DIR/ipc_transport.py"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "  1. Open FL Studio"

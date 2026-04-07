@@ -1,18 +1,19 @@
-//! Pipe IPC for communicating with FL Studio's MIDI script.
+//! Unix pipe IPC backend.
 //!
-//! Creates two anonymous pipes and maps them to well-known file descriptors:
+//! Creates two anonymous pipes via `pipe(2)` and remaps the FL-facing ends
+//! onto well-known file descriptors so the embedded Python MIDI script can
+//! read/write them directly through `os.read` / `os.write`:
+//!
 //! - fd 20: FL script reads commands from plugin (plugin writes, FL reads)
 //! - fd 21: FL script writes responses to plugin (FL writes, plugin reads)
 //!
-//! This approach is proven from the fl-bridge project. FL Studio's Python
-//! subinterpreter blocks socket/threading but os.read/os.write on inherited
-//! fds works reliably.
+//! This works because the plugin and FL's Python subinterpreter live in
+//! the same process and share the same fd table. FL's Python is restricted
+//! (no sockets, no threads) but inherited fds with `os.read` work reliably.
 //!
-//! Platform: macOS/Linux only. Windows requires a separate implementation
-//! using CreateNamedPipe / PeekNamedPipe.
-
-#[cfg(not(unix))]
-compile_error!("pipe_ipc.rs requires a Unix platform (macOS/Linux). Windows support requires a separate implementation.");
+//! The Windows backend uses a different transport (named pipes by name)
+//! because Windows has no analogous fd-inheritance trick that survives
+//! cross-CRT boundaries — see `windows.rs`.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -149,13 +150,6 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "FL script pipe closed"));
         }
     }
-}
-
-/// Async wrapper for relay_to_fl, safe to call from tokio tasks.
-pub async fn relay_to_fl_async(payload: String) -> io::Result<String> {
-    tokio::task::spawn_blocking(move || relay_to_fl(&payload))
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
 }
 
 /// Check if pipes are initialized.

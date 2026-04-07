@@ -4,37 +4,33 @@
 
 """FL Studio MIDI Script for Studio AI.
 
-Communicates with the Rust VST3 plugin via pipe IPC (fd 20/21).
-The plugin creates anonymous pipes before this script loads.
+Communicates with the Rust VST3 plugin via a platform-abstracted IPC
+transport. On Unix the transport uses anonymous pipes inherited on
+fds 20/21; on Windows it uses named pipes discovered through a
+rendezvous file. See `ipc_transport.py` for the gritty details.
 
-Protocol:
-  - fd 20: This script reads JSON commands (one per line, newline-delimited)
-  - fd 21: This script writes JSON responses (one per line, newline-delimited)
-
-Command format:  {"id": "uuid", "action": "set_bpm", "params": {"bpm": 160}}
-Response format: {"id": "uuid", "success": true, "data": {"bpm": 160}}
+Protocol (identical on both platforms):
+  Command:  {"id": "uuid", "action": "set_bpm", "params": {"bpm": 160}}
+  Response: {"id": "uuid", "success": true, "data": {"bpm": 160}}
 """
 
-import os
 import json
-import sys
 
-# ── Constants ──
-CMD_FD = 20     # Read commands from plugin
-RESP_FD = 21    # Write responses to plugin
+from handlers_organize import ORGANIZE_HANDLERS
+from ipc_transport import transport
 
 # ── Module state ──
-_initialized = False
 _cmd_buffer = b""
 _init_check_counter = 0
-_INIT_CHECK_INTERVAL = 50  # Check every ~1 second (OnIdle runs ~50Hz)
+_INIT_CHECK_INTERVAL = 50  # Retry connect every ~1s (OnIdle runs ~50Hz)
 
 
 # ──────────────────── FL Studio callbacks ────────────────────
 
 def OnInit():
     """Called when FL Studio loads this MIDI script."""
-    _try_init_pipes()
+    if transport.try_connect():
+        _log("Studio AI bridge ready")
 
 
 def OnDeInit():
@@ -42,39 +38,20 @@ def OnDeInit():
     _log("Studio AI bridge shutting down")
 
 
-def _try_init_pipes():
-    """Attempt to initialize pipe IPC. Returns True if ready."""
-    global _initialized
-    if _initialized:
-        return True
-    try:
-        os.fstat(CMD_FD)
-        os.fstat(RESP_FD)
-        _initialized = True
-        _log("Studio AI bridge ready (pipe IPC on fd 20/21)")
-        return True
-    except OSError:
-        return False
-
-
 def OnIdle():
-    """Called ~50Hz by FL Studio. Polls for commands on fd 20."""
+    """Called ~50Hz by FL Studio. Polls for commands."""
     global _cmd_buffer, _init_check_counter
 
-    if not _initialized:
-        # Retry pipe detection periodically until plugin is loaded
+    if not transport.is_ready():
+        # Retry transport setup periodically until the plugin side is up.
         _init_check_counter += 1
         if _init_check_counter >= _INIT_CHECK_INTERVAL:
             _init_check_counter = 0
-            _try_init_pipes()
+            if transport.try_connect():
+                _log("Studio AI bridge ready")
         return
 
-    # Non-blocking read from command pipe
-    try:
-        chunk = os.read(CMD_FD, 65536)
-    except OSError:
-        return  # EAGAIN / EWOULDBLOCK — no data available
-
+    chunk = transport.read_available()
     if not chunk:
         return
 
@@ -121,15 +98,15 @@ def _handle_command(raw_line):
 
 
 def _send_response(cmd_id, success, data=None):
-    """Write a JSON response to the response pipe."""
+    """Write a JSON response back to the plugin."""
     response = json.dumps({
         "id": cmd_id,
         "success": success,
         "data": data,
     })
     try:
-        os.write(RESP_FD, (response + "\n").encode("utf-8"))
-    except OSError as e:
+        transport.write_response((response + "\n").encode("utf-8"))
+    except Exception as e:
         _log("Failed to write response: %s" % e)
 
 
@@ -266,7 +243,7 @@ def _cmd_rename_track(params):
 _HANDLERS = {
     "set_bpm": _cmd_set_bpm,
     "get_state": _cmd_get_state,
-    "get_project_state": _cmd_get_state,
+    "get_project_state": _cmd_get_state,  # overridden below by ORGANIZE_HANDLERS
     "add_track": _cmd_add_track,
     "play": _cmd_play,
     "stop": _cmd_stop,
@@ -276,6 +253,7 @@ _HANDLERS = {
     "set_track_mute": _cmd_set_track_mute,
     "set_track_solo": _cmd_set_track_solo,
     "rename_track": _cmd_rename_track,
+    **ORGANIZE_HANDLERS,  # organization agent handlers (overrides get_project_state)
 }
 
 
