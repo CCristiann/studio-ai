@@ -56,6 +56,8 @@ def OnSysEx(event):
     if raw is None or len(raw) < 5:
         return
 
+    _log("sysex bytes[0:8]: " + " ".join(hex(b) for b in raw[:8]))
+
     try:
         tag, json_str = decode_sysex(raw)
     except ValueError as e:
@@ -95,11 +97,18 @@ def _handle_command(json_str):
 
 
 def _send_internal(cmd_id, success, data=None):
+    import os
     payload = json.dumps({"id": cmd_id, "success": success, "data": data})
+    # Write response to file — plugin polls this file since MIDI internal
+    # bus routing between FL scripts is unreliable on Windows.
+    resp_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Studio AI", "resp")
     try:
-        device.midiOutSysex(encode_sysex(TAG_INTERNAL, payload))
+        os.makedirs(resp_dir, exist_ok=True)
+        resp_file = os.path.join(resp_dir, cmd_id + ".json")
+        with open(resp_file, "w", encoding="utf-8") as f:
+            f.write(payload)
     except Exception as e:
-        _log("midiOutSysex (internal) failed: " + str(e))
+        _log("write response file failed: " + str(e))
 
 
 # ---- Handlers ----

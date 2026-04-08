@@ -59,8 +59,13 @@ def decode_sysex(data):
     if data[1] != MFR_ID:
         raise ValueError("Wrong manufacturer ID: " + hex(data[1]))
     tag = data[2]
+    payload_bytes = data[3:-1]
     try:
-        json_str = base64.b64decode(data[3:-1]).decode("utf-8")
-    except Exception as e:
-        raise ValueError("Payload decode error: " + str(e))
+        json_str = base64.b64decode(payload_bytes).decode("utf-8")
+    except Exception:
+        # Fallback: old plugin versions send raw UTF-8 JSON (no base64)
+        try:
+            json_str = payload_bytes.decode("utf-8")
+        except Exception as e:
+            raise ValueError("Payload decode error: " + str(e))
     return tag, json_str

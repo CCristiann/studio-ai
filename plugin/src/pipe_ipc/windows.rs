@@ -109,6 +109,11 @@ pub fn is_initialized() -> bool {
 }
 
 /// Send a JSON command to FL Studio and wait up to 5 s for the response.
+///
+/// Response transport: the FL Studio receive script writes a JSON file to
+/// `%LOCALAPPDATA%\Studio AI\resp\{cmd_id}.json`.  We poll that file here.
+/// The MIDI input thread / channel is kept for future use but not used for
+/// responses (FL Studio's internal Port-1 bus routing is unreliable on Windows).
 pub fn relay_to_fl(payload: &str) -> io::Result<String> {
     // Lazy-connect: try setup on every call until it succeeds
     if !INITIALIZED.load(Ordering::SeqCst) {
@@ -127,14 +132,20 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
         .lock()
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "relay lock poisoned"))?;
 
-    // Fresh one-shot response channel
-    let (tx, rx) = mpsc::sync_channel::<String>(1);
-    {
-        let mutex = RESP_TX
-            .get()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "MIDI IPC not initialised"))?;
-        *mutex.lock().unwrap() = Some(tx);
-    }
+    // Extract cmd_id from the JSON payload for response file matching.
+    let cmd_id = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // Prepare response file path.
+    let resp_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("C:/Users/Public"))
+        .join("Studio AI")
+        .join("resp");
+    let _ = std::fs::create_dir_all(&resp_dir);
+    let resp_file = resp_dir.join(format!("{}.json", cmd_id));
+    let _ = std::fs::remove_file(&resp_file); // remove any stale file
 
     // Build SysEx: F0 7D 01 <base64(json)> F7
     // base64 ensures all payload bytes are <= 0x7F (MIDI SysEx safe).
@@ -155,8 +166,23 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("MIDI send: {}", e)))?;
     }
 
-    rx.recv_timeout(RELAY_TIMEOUT)
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "FL script response timeout (5 s)"))
+    // Poll for response file written by the FL Studio receive script.
+    let deadline = std::time::Instant::now() + RELAY_TIMEOUT;
+    loop {
+        if resp_file.exists() {
+            let content = std::fs::read_to_string(&resp_file)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("read resp file: {}", e)))?;
+            let _ = std::fs::remove_file(&resp_file);
+            return Ok(content);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "FL script response timeout (5 s)",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 // ─────────────────────── MIDI input thread ───────────────────────
