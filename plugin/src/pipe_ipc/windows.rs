@@ -221,10 +221,8 @@ fn on_sysex(msg: &[u8]) {
 
 #[cfg(test)]
 mod tests {
+    use super::{MFR_ID, TAG_CMD};
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-
-    const MFR_ID_TEST: u8 = 0x7D;
-    const TAG_CMD_TEST: u8 = 0x01;
 
     #[test]
     fn test_sysex_encode_decode_roundtrip() {
@@ -233,13 +231,13 @@ mod tests {
         // Encode path (what relay_to_fl will do)
         let encoded = STANDARD.encode(payload.as_bytes());
         let mut sysex = Vec::new();
-        sysex.extend_from_slice(&[0xF0, MFR_ID_TEST, TAG_CMD_TEST]);
+        sysex.extend_from_slice(&[0xF0, MFR_ID, TAG_CMD]);
         sysex.extend_from_slice(encoded.as_bytes());
         sysex.push(0xF7);
 
         assert_eq!(sysex[0], 0xF0);
-        assert_eq!(sysex[1], MFR_ID_TEST);
-        assert_eq!(sysex[2], TAG_CMD_TEST);
+        assert_eq!(sysex[1], MFR_ID);
+        assert_eq!(sysex[2], TAG_CMD);
         assert_eq!(*sysex.last().unwrap(), 0xF7);
 
         // Decode path (what on_sysex will do)
@@ -255,7 +253,7 @@ mod tests {
         let payload = r#"{"name":"K\u00fcche \u2014 test"}"#;
         let encoded = STANDARD.encode(payload.as_bytes());
         let mut sysex = Vec::new();
-        sysex.extend_from_slice(&[0xF0, MFR_ID_TEST, TAG_CMD_TEST]);
+        sysex.extend_from_slice(&[0xF0, MFR_ID, TAG_CMD]);
         sysex.extend_from_slice(encoded.as_bytes());
         sysex.push(0xF7);
 
