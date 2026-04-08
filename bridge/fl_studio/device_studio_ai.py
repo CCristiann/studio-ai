@@ -28,6 +28,7 @@ import json
 import sys
 import device
 
+from _protocol import encode_sysex, decode_sysex, TAG_CMD, TAG_RESP
 from handlers_organize import ORGANIZE_HANDLERS
 
 try:
@@ -37,10 +38,6 @@ except Exception:
     _USE_PIPE = False
 
 _pipe_buf = b""  # accumulate partial line-delimited reads from fd 20
-
-_MFR_ID  = 0x7D
-_TAG_CMD  = 0x01
-_TAG_RESP = 0x02
 
 
 # ──────────────────── FL Studio callbacks ────────────────────
@@ -80,27 +77,23 @@ def OnSysEx(event):
         return  # pipe transport is active; SysEx is not used on macOS
     _log("OnSysEx called has_sysex=" + str(hasattr(event, "sysex")))
     try:
-        data = bytes(event.sysex) if hasattr(event, "sysex") and event.sysex else None
+        raw = bytes(event.sysex) if hasattr(event, "sysex") and event.sysex else None
     except Exception as e:
         _log("sysex read error: " + str(e))
-        data = None
+        return
 
     event.handled = True
 
-    _log("SysEx len=" + str(len(data) if data else 0))
-
-    if data is None or len(data) < 5:
-        return
-    if data[0] != 0xF0 or data[1] != _MFR_ID or data[2] != _TAG_CMD:
-        _log("SysEx header mismatch: " + str(list(data[:4])))
-        return
-    if data[-1] != 0xF7:
+    if raw is None or len(raw) < 5:
         return
 
     try:
-        json_str = data[3:-1].decode("utf-8")
-    except Exception as e:
-        _log("SysEx decode error: " + str(e))
+        tag, json_str = decode_sysex(raw)
+    except ValueError as e:
+        _log("decode error: " + str(e))
+        return
+
+    if tag != TAG_CMD:
         return
 
     _handle_command(json_str)
@@ -168,13 +161,8 @@ def _send_pipe_response(cmd_id, success, data=None):
 
 def _send_response(cmd_id, success, data=None):
     payload = json.dumps({"id": cmd_id, "success": success, "data": data})
-    sysex = (
-        bytes([0xF0, _MFR_ID, _TAG_RESP])
-        + payload.encode("utf-8")
-        + bytes([0xF7])
-    )
     try:
-        device.midiOutSysex(sysex)
+        device.midiOutSysex(encode_sysex(TAG_RESP, payload))
     except Exception as e:
         _log("midiOutSysex failed: " + str(e))
 
