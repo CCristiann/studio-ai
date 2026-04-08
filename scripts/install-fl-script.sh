@@ -18,8 +18,6 @@ SCRIPT_SRC="$ROOT_DIR/bridge/fl_studio/device_studio_ai.py"
 HANDLERS_SRC="$ROOT_DIR/bridge/fl_studio/handlers_organize.py"
 TRANSPORT_SRC="$ROOT_DIR/bridge/fl_studio/ipc_transport.py"
 PROTOCOL_SRC="$ROOT_DIR/bridge/fl_studio/_protocol.py"
-RECEIVE_SRC="$ROOT_DIR/bridge/fl_studio/device_studio_ai_receive.py"
-RESPOND_SRC="$ROOT_DIR/bridge/fl_studio/device_studio_ai_respond.py"
 
 # Determine FL Studio Hardware directory
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -60,15 +58,6 @@ if [ ! -f "$PROTOCOL_SRC" ]; then
     echo -e "${RED}Protocol module not found: $PROTOCOL_SRC${NC}"
     exit 1
 fi
-if [ ! -f "$RECEIVE_SRC" ]; then
-    echo -e "${RED}Receive script not found: $RECEIVE_SRC${NC}"
-    exit 1
-fi
-if [ ! -f "$RESPOND_SRC" ]; then
-    echo -e "${RED}Respond script not found: $RESPOND_SRC${NC}"
-    exit 1
-fi
-
 # Create destination directory
 mkdir -p "$DEST_DIR"
 
@@ -77,8 +66,9 @@ cp "$SCRIPT_SRC" "$DEST_FILE"
 cp "$HANDLERS_SRC" "$DEST_DIR/handlers_organize.py"
 cp "$TRANSPORT_SRC" "$DEST_DIR/ipc_transport.py"
 cp "$PROTOCOL_SRC" "$DEST_DIR/_protocol.py"
-cp "$RECEIVE_SRC"  "$DEST_DIR/device_studio_ai_receive.py"
-cp "$RESPOND_SRC"  "$DEST_DIR/device_studio_ai_respond.py"
+
+# Clean up legacy two-script install artifacts from previous versions.
+rm -f "$DEST_DIR/device_studio_ai_receive.py" "$DEST_DIR/device_studio_ai_respond.py"
 
 echo -e "${GREEN}FL Studio MIDI scripts installed to:${NC}"
 echo "  $DEST_DIR/"
@@ -103,23 +93,24 @@ else
     echo "       Studio AI Cmd"
     echo "       Studio AI Resp"
     echo "  3. Open FL Studio -> Options -> MIDI Settings"
-    echo "  4. Add TWO controller entries:"
+    echo "  4. Configure ONE controller (single script, two cables, one Port):"
     echo ""
-    echo "     Entry 1 (receive):"
-    echo "       Input:           Studio AI Cmd"
-    echo "       Output:          (leave empty / not set)"
+    echo "     Input row:"
+    echo "       Device:          Studio AI Cmd"
+    echo "       Controller type: Studio AI"
     echo "       Port:            1"
-    echo "       Controller type: Studio AI Receive"
+    echo "       Enabled:         yes"
     echo ""
-    echo "     Entry 2 (respond):"
-    echo "       Input:           Studio AI Cmd"
-    echo "       Output:          Studio AI Resp"
-    echo "       Port:            1   <- must match Entry 1"
-    echo "       Controller type: Studio AI Respond"
+    echo "     Output row:"
+    echo "       Device:          Studio AI Resp"
+    echo "       Port:            1   <- MUST match the Input Port number"
+    echo "       Enabled:         yes"
     echo ""
-    echo "  5. Enable both entries (green button on each)"
+    echo "  FL routes device.midiOutSysex() from the script to 'Studio AI Resp'"
+    echo "  because both cables share Port number 1. The Output row has no"
+    echo "  controller-type field — that's expected."
     echo ""
-    echo "  Both entries must use Port=1."
+    echo "  5. Options -> General settings -> enable 'Run in background'."
 fi
 
 echo -e "${GREEN}Done!${NC}"

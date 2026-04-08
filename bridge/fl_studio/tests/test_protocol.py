@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from _protocol import (
     encode_sysex, decode_sysex,
-    TAG_CMD, TAG_RESP, TAG_INTERNAL, MFR_ID,
+    TAG_CMD, TAG_RESP, MFR_ID,
 )
 
 
@@ -39,12 +39,6 @@ class TestEncodeDecodeSysex(unittest.TestCase):
         data_bytes = sysex[1:-1]  # exclude F0, F7
         for i, b in enumerate(data_bytes):
             self.assertLess(b, 0x80, f"byte[{i+1}] = {b:#x} exceeds 0x7F")
-
-    def test_tag_internal(self):
-        sysex = encode_sysex(TAG_INTERNAL, '{"success":true}')
-        tag, decoded = decode_sysex(sysex)
-        self.assertEqual(tag, TAG_INTERNAL)
-        self.assertEqual(decoded, '{"success":true}')
 
     def test_tag_resp(self):
         sysex = encode_sysex(TAG_RESP, '{"success":true,"data":{}}')

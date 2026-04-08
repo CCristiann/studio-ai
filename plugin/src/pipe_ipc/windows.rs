@@ -1,31 +1,42 @@
-//! Windows IPC backend: MIDI SysEx via LoopMIDI virtual port.
+//! Windows IPC backend: MIDI SysEx via LoopMIDI virtual ports.
 //!
-//! FL Studio's Python subinterpreter blocks all _winapi pipe/socket creation
-//! (CreateFile, CreateNamedPipe, CreatePipe all return INVALID_HANDLE with
-//! err=0, meaning a Python-level security hook fires before any Win32 call).
-//! MIDI messages are the only proven IPC mechanism for FL Studio scripts.
+//! FL Studio's Python subinterpreter blocks all _winapi pipe/socket creation,
+//! so MIDI SysEx is the only proven IPC mechanism for FL Studio scripts.
+//!
+//! ## Architecture
+//!
+//! One FL Studio script (`device_studio_ai.py`) owns one Port number
+//! (Port 1 by convention). Two loopMIDI cables share that Port number:
+//!
+//!   Plugin OUT -> "Studio AI Cmd"  -> FL Input  (Port 1, Studio AI script)
+//!   Plugin IN  <- "Studio AI Resp" <- FL Output (Port 1, no script field)
+//!
+//! FL routes `device.midiOutSysex()` from the script to "Studio AI Resp"
+//! purely because both rows share Port number 1 in MIDI Settings. This is
+//! the only correct shape — FL attaches scripts to Inputs only; there is
+//! no "output script" slot.
 //!
 //! ## Setup
 //!
 //! 1. Install LoopMIDI: https://www.tobias-erichsen.de/software/loopmidi.html
 //! 2. Create TWO virtual ports: "Studio AI Cmd" and "Studio AI Resp".
-//! 3. In FL Studio MIDI Settings → add a controller:
-//!    - Input:  "Studio AI Cmd"   (FL receives plugin commands here)
-//!    - Output: "Studio AI Resp"  (FL sends responses here)
-//!    - Controller type: Studio AI
-//! Note: WinMM only allows one exclusive MIDI output opener per port.
-//!       Two ports are required so plugin and FL can each own one output.
+//! 3. In FL Studio MIDI Settings:
+//!    - Input row:  device "Studio AI Cmd",  type Studio AI, Port 1, enabled.
+//!    - Output row: device "Studio AI Resp", Port 1, enabled.
+//!    Both Port numbers MUST match.
 //!
 //! ## Protocol
 //!
-//! Command  (plugin → FL):   F0 7D 01 <UTF-8 JSON bytes> F7
-//! Response (FL → plugin):   F0 7D 02 <UTF-8 JSON bytes> F7
+//! Command  (plugin → FL):   F0 7D 01 <base64(UTF-8 JSON)> F7
+//! Response (FL → plugin):   F0 7D 02 <base64(UTF-8 JSON)> F7
 //!
 //! 0x7D = non-commercial / educational SysEx manufacturer ID.
-//! Plugin ignores 01-tagged messages (its own echoes); FL script ignores 02.
+//! Base64 keeps every payload byte <= 0x7F (MIDI SysEx safe).
+//! Requests and responses are correlated via the `id` field in the JSON.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use midir::{MidiInput, MidiOutput, MidiOutputConnection};
+use std::collections::HashMap;
 use std::io;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -46,9 +57,14 @@ const RELAY_TIMEOUT: Duration = Duration::from_secs(5);
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static OUTPUT: Mutex<Option<MidiOutputConnection>> = Mutex::new(None);
-static RELAY_LOCK: Mutex<()> = Mutex::new(());
 static SETUP_LOCK: Mutex<()> = Mutex::new(());
-static RESP_TX: OnceLock<Mutex<Option<mpsc::SyncSender<String>>>> = OnceLock::new();
+/// Per-request response channels keyed by command id. The MIDI input thread
+/// looks up the matching sender in `on_sysex` and delivers the JSON payload.
+static PENDING: OnceLock<Mutex<HashMap<String, mpsc::SyncSender<String>>>> = OnceLock::new();
+
+fn pending() -> &'static Mutex<HashMap<String, mpsc::SyncSender<String>>> {
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 // ─────────────────────── public API ───────────────────────
 
@@ -58,7 +74,7 @@ static RESP_TX: OnceLock<Mutex<Option<mpsc::SyncSender<String>>>> = OnceLock::ne
 pub fn setup_pipes() -> io::Result<()> {
     // Reset initialized so retry is possible
     INITIALIZED.store(false, Ordering::SeqCst);
-    RESP_TX.get_or_init(|| Mutex::new(None));
+    let _ = pending(); // force init
 
     let midi_out = MidiOutput::new("Studio AI")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
@@ -110,10 +126,10 @@ pub fn is_initialized() -> bool {
 
 /// Send a JSON command to FL Studio and wait up to 5 s for the response.
 ///
-/// Response transport: the FL Studio receive script writes a JSON file to
-/// `%LOCALAPPDATA%\Studio AI\resp\{cmd_id}.json`.  We poll that file here.
-/// The MIDI input thread / channel is kept for future use but not used for
-/// responses (FL Studio's internal Port-1 bus routing is unreliable on Windows).
+/// Response transport: the FL Studio script calls `device.midiOutSysex(...)`,
+/// which FL routes to "Studio AI Resp" (same Port number as the input cable).
+/// The MIDI input thread in this module parses the SysEx, extracts the
+/// command id, and delivers the JSON to the matching waiter in `PENDING`.
 pub fn relay_to_fl(payload: &str) -> io::Result<String> {
     // Lazy-connect: try setup on every call until it succeeds
     if !INITIALIZED.load(Ordering::SeqCst) {
@@ -122,40 +138,38 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             if let Err(e) = setup_pipes() {
                 return Err(io::Error::new(
                     io::ErrorKind::NotConnected,
-                    format!("MIDI IPC not available (is LoopMIDI running with 'Studio AI' port?): {}", e),
+                    format!("MIDI IPC not available (is LoopMIDI running with 'Studio AI Cmd' and 'Studio AI Resp' ports?): {}", e),
                 ));
             }
         }
     }
 
-    let _lock = RELAY_LOCK
-        .lock()
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "relay lock poisoned"))?;
-
-    // Extract cmd_id from the JSON payload for response file matching.
+    // Extract cmd_id from the payload so we can correlate the response.
     let cmd_id = serde_json::from_str::<serde_json::Value>(payload)
         .ok()
         .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "command payload missing 'id' field")
+        })?;
 
-    // Prepare response file path.
-    let resp_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("C:/Users/Public"))
-        .join("Studio AI")
-        .join("resp");
-    let _ = std::fs::create_dir_all(&resp_dir);
-    let resp_file = resp_dir.join(format!("{}.json", cmd_id));
-    let _ = std::fs::remove_file(&resp_file); // remove any stale file
+    // Register a response channel for this id BEFORE sending, so we cannot
+    // miss a fast response that arrives between send and register.
+    let (tx, rx) = mpsc::sync_channel::<String>(1);
+    {
+        let mut map = pending()
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "pending map poisoned"))?;
+        map.insert(cmd_id.clone(), tx);
+    }
 
-    // Build SysEx: F0 7D 01 <base64(json)> F7
-    // base64 ensures all payload bytes are <= 0x7F (MIDI SysEx safe).
+    // Build SysEx: F0 7D 01 <base64(json)> F7. base64 keeps bytes <= 0x7F.
     let encoded = STANDARD.encode(payload.as_bytes());
     let mut sysex = Vec::with_capacity(encoded.len() + 4);
     sysex.extend_from_slice(&[0xF0, MFR_ID, TAG_CMD]);
     sysex.extend_from_slice(encoded.as_bytes());
     sysex.push(0xF7);
 
-    {
+    let send_result = {
         let mut guard = OUTPUT
             .lock()
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "MIDI output lock poisoned"))?;
@@ -163,25 +177,30 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             io::Error::new(io::ErrorKind::NotConnected, "MIDI output not connected")
         })?;
         conn.send(&sysex)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("MIDI send: {}", e)))?;
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("MIDI send: {}", e)))
+    };
+    if let Err(e) = send_result {
+        let _ = pending().lock().map(|mut m| m.remove(&cmd_id));
+        return Err(e);
     }
 
-    // Poll for response file written by the FL Studio receive script.
-    let deadline = std::time::Instant::now() + RELAY_TIMEOUT;
-    loop {
-        if resp_file.exists() {
-            let content = std::fs::read_to_string(&resp_file)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("read resp file: {}", e)))?;
-            let _ = std::fs::remove_file(&resp_file);
-            return Ok(content);
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(io::Error::new(
+    // Wait for the MIDI input thread to deliver the response JSON.
+    match rx.recv_timeout(RELAY_TIMEOUT) {
+        Ok(json) => Ok(json),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let _ = pending().lock().map(|mut m| m.remove(&cmd_id));
+            Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "FL script response timeout (5 s)",
-            ));
+            ))
         }
-        std::thread::sleep(Duration::from_millis(10));
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = pending().lock().map(|mut m| m.remove(&cmd_id));
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "response channel disconnected",
+            ))
+        }
     }
 }
 
@@ -231,17 +250,32 @@ fn on_sysex(msg: &[u8]) {
             return;
         }
     };
-    match std::str::from_utf8(&decoded) {
-        Ok(json) => {
-            if let Some(mutex) = RESP_TX.get() {
-                if let Ok(guard) = mutex.lock() {
-                    if let Some(tx) = guard.as_ref() {
-                        let _ = tx.try_send(json.to_string());
-                    }
-                }
-            }
+    let json = match std::str::from_utf8(&decoded) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("Studio AI: response UTF-8 error: {}", e);
+            return;
         }
-        Err(e) => log::warn!("Studio AI: response UTF-8 error: {}", e),
+    };
+
+    // Extract the command id to route the response to its waiter.
+    let cmd_id = match serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+    {
+        Some(id) => id,
+        None => {
+            log::warn!("Studio AI: response missing 'id' field: {}", json);
+            return;
+        }
+    };
+
+    let tx_opt = pending().lock().ok().and_then(|mut m| m.remove(&cmd_id));
+    match tx_opt {
+        Some(tx) => {
+            let _ = tx.try_send(json.to_string());
+        }
+        None => log::warn!("Studio AI: unmatched response id {}", cmd_id),
     }
 }
 

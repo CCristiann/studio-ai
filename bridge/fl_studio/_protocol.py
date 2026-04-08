@@ -1,24 +1,21 @@
 """SysEx protocol helpers for Studio AI.
 
-Shared by device_studio_ai_receive.py and device_studio_ai_respond.py.
-No FL Studio API imports — this module can be imported and tested
-outside FL Studio.
+Used by device_studio_ai.py. No FL Studio API imports — this module
+can be imported and tested outside FL Studio.
 
 Wire format:
     F0  7D  [TAG]  [base64(UTF-8 JSON)]  F7
 
 Tags:
-    TAG_CMD      = 0x01  — plugin -> receive script (external, via Studio AI Cmd)
-    TAG_RESP     = 0x02  — respond script -> plugin (external, via Studio AI Resp)
-    TAG_INTERNAL = 0x03  — receive script -> respond script (FL internal port bus)
+    TAG_CMD  = 0x01  — plugin -> FL script (via Studio AI Cmd input cable)
+    TAG_RESP = 0x02  — FL script -> plugin (via Studio AI Resp output cable)
 """
 
 import base64
 
-MFR_ID       = 0x7D
-TAG_CMD      = 0x01
-TAG_RESP     = 0x02
-TAG_INTERNAL = 0x03
+MFR_ID   = 0x7D
+TAG_CMD  = 0x01
+TAG_RESP = 0x02
 
 _SYSEX_START = 0xF0
 _SYSEX_END   = 0xF7
@@ -30,7 +27,7 @@ def encode_sysex(tag, json_str):
     All bytes between F0 and F7 are guaranteed < 0x80 (MIDI-safe).
 
     Args:
-        tag:      One of TAG_CMD, TAG_RESP, TAG_INTERNAL.
+        tag:      One of TAG_CMD, TAG_RESP.
         json_str: A valid JSON string (str).
 
     Returns:

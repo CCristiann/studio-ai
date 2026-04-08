@@ -6,13 +6,30 @@
 Communicates with the Studio AI VST3 plugin via MIDI SysEx messages over a
 LoopMIDI virtual port named "Studio AI".
 
-Setup
------
-1. Install LoopMIDI and create a port named "Studio AI".
-2. In FL Studio: Options → MIDI Settings → add a controller entry:
-   - Input:           Studio AI
-   - Output:          Studio AI   (same port — LoopMIDI loops it back)
-   - Controller type: Studio AI
+Setup (Windows)
+---------------
+1. Install LoopMIDI and create TWO virtual ports:
+     - "Studio AI Cmd"   (plugin -> FL commands)
+     - "Studio AI Resp"  (FL -> plugin responses)
+2. In FL Studio: Options -> MIDI Settings.
+   Input row:
+     - Device:          Studio AI Cmd
+     - Controller type: Studio AI
+     - Port:            1
+     - Enabled:         yes
+   Output row:
+     - Device:          Studio AI Resp
+     - Port:            1   (MUST match the input Port number)
+     - Enabled:         yes
+   Only the Input row has a controller-type field. FL routes
+   device.midiOutSysex() from this script to "Studio AI Resp"
+   purely because both cables share Port number 1.
+3. Options -> General settings -> enable "Run in background" so
+   the script keeps responding when FL loses focus.
+
+Setup (macOS)
+-------------
+Uses the ipc_transport pipe backend; no MIDI routing needed.
 
 Protocol
 --------
@@ -219,11 +236,13 @@ def _cmd_get_state(params):
 
 
 def _cmd_add_track(params):
-    import channels
-    name = params.get("name", "New Track")
-    idx = channels.channelCount()
-    channels.setChannelName(idx, name)
-    return {"index": idx, "name": name}
+    # FL Studio's Python SDK has no addChannel() API — channelCount() returns
+    # the count, and index == count is out of range until a new channel is
+    # added through the UI. Fail loudly instead of silently corrupting state.
+    raise ValueError(
+        "add_track is not supported: FL Studio's Python SDK has no addChannel() API. "
+        "Add channels manually in the Channel Rack."
+    )
 
 
 def _cmd_play(params):
@@ -263,14 +282,20 @@ def _cmd_set_track_pan(params):
 def _cmd_set_track_mute(params):
     import mixer
     index = int(params.get("index", 0))
-    mixer.muteTrack(index)
+    muted = bool(params.get("muted", True))
+    # muteTrack is a toggle — only call it if the current state differs
+    if bool(mixer.isTrackMuted(index)) != muted:
+        mixer.muteTrack(index)
     return {"index": index, "muted": bool(mixer.isTrackMuted(index))}
 
 
 def _cmd_set_track_solo(params):
     import mixer
     index = int(params.get("index", 0))
-    mixer.soloTrack(index)
+    solo = bool(params.get("solo", True))
+    # soloTrack is a toggle — only call it if the current state differs
+    if bool(mixer.isTrackSolo(index)) != solo:
+        mixer.soloTrack(index)
     return {"index": index, "solo": bool(mixer.isTrackSolo(index))}
 
 
