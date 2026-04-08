@@ -152,9 +152,13 @@ def _cmd_get_state(params):
 def _cmd_add_track(params):
     import channels
     name = params.get("name", "New Track")
-    idx = channels.channelCount()
-    channels.setChannelName(idx, name)
-    return {"index": idx, "name": name}
+    # channelCount() returns the count; index = count is out of range until a
+    # new channel is added. FL Studio has no public addChannel() API in the
+    # scripting SDK, so we return a descriptive error instead of silently failing.
+    raise ValueError(
+        "add_track is not supported: FL Studio's Python SDK has no addChannel() API. "
+        "Add channels manually in the Channel Rack."
+    )
 
 
 def _cmd_play(params):
@@ -194,14 +198,20 @@ def _cmd_set_track_pan(params):
 def _cmd_set_track_mute(params):
     import mixer
     index = int(params.get("index", 0))
-    mixer.muteTrack(index)
+    muted = bool(params.get("muted", True))
+    # muteTrack is a toggle — only call it if the current state differs
+    if bool(mixer.isTrackMuted(index)) != muted:
+        mixer.muteTrack(index)
     return {"index": index, "muted": bool(mixer.isTrackMuted(index))}
 
 
 def _cmd_set_track_solo(params):
     import mixer
     index = int(params.get("index", 0))
-    mixer.soloTrack(index)
+    solo = bool(params.get("solo", True))
+    # soloTrack is a toggle — only call it if the current state differs
+    if bool(mixer.isTrackSolo(index)) != solo:
+        mixer.soloTrack(index)
     return {"index": index, "solo": bool(mixer.isTrackSolo(index))}
 
 
