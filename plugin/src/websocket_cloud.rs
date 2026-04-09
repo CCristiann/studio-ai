@@ -177,11 +177,6 @@ async fn relay_action_to_fl(action_json: &str) -> String {
 
     let msg_id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
 
-    if !pipe_ipc::is_initialized() {
-        log::error!("Pipe IPC not initialized, cannot relay to FL Studio");
-        return make_error_response(msg_id, "BRIDGE_DISCONNECTED", "Pipe IPC not initialized");
-    }
-
     if parsed.get("payload").is_none() {
         return make_error_response(msg_id, "DAW_ERROR", "Missing payload in action");
     }
@@ -224,14 +219,13 @@ async fn relay_action_to_fl(action_json: &str) -> String {
             }
         }
         Err(e) => {
-            let code = if e.kind() == std::io::ErrorKind::TimedOut {
-                "DAW_TIMEOUT"
-            } else if e.kind() == std::io::ErrorKind::BrokenPipe {
-                "BRIDGE_DISCONNECTED"
-            } else {
-                "DAW_ERROR"
+            let code = match e.kind() {
+                std::io::ErrorKind::TimedOut => "DAW_TIMEOUT",
+                std::io::ErrorKind::BrokenPipe => "BRIDGE_DISCONNECTED",
+                std::io::ErrorKind::NotConnected | std::io::ErrorKind::NotFound => "BRIDGE_DISCONNECTED",
+                _ => "DAW_ERROR",
             };
-            log::error!("Pipe IPC relay failed: {}", e);
+            log::error!("MIDI IPC relay failed: {}", e);
             make_error_response(msg_id, code, &e.to_string())
         }
     }

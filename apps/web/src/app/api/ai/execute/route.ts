@@ -42,6 +42,9 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: google("gemini-2.5-flash"),
+    providerOptions: {
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+    },
     system: `You are Studio AI, an AI assistant that controls FL Studio through natural language.
 
 You can:
