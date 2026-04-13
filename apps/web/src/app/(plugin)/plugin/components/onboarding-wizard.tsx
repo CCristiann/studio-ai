@@ -87,6 +87,7 @@ export function OnboardingWizard({
           </div>
           <Button
             onClick={handleNext}
+            disabled={updatePreferences.isPending}
             size="sm"
             className="rounded-full px-5"
           >
