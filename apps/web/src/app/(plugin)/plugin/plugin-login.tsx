@@ -1,96 +1,76 @@
-"use client";
+'use client'
 
-import { useState, useRef, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { useInitiateDeviceFlow } from '@/hooks/mutations/use-device-auth-mutations'
+import { authQueries } from '@/lib/query/queries/auth'
 
 export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
-  const [loading, setLoading] = useState(false);
-  const [userCode, setUserCode] = useState("");
-  const [error, setError] = useState("");
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sessionId, setSessionId] = useState('')
+  const [deviceCode, setDeviceCode] = useState('')
+  const [userCode, setUserCode] = useState('')
+  const [expiresAt, setExpiresAt] = useState(0)
+  const [error, setError] = useState('')
 
-  const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  };
+  const initiate = useInitiateDeviceFlow()
 
-  // Clean up polling on unmount
+  // Poll for token once device flow is initiated
+  const { data: pollData } = useQuery({
+    ...authQueries.deviceToken(sessionId, deviceCode, expiresAt),
+  })
+
+  // When polling returns a complete token, pass it up
   useEffect(() => {
-    return () => stopPolling();
-  }, []);
+    if (pollData?.status === 'complete' && pollData.token) {
+      onToken(pollData.token)
+    } else if (pollData?.status === 'expired') {
+      setError('Session expired. Please try again.')
+      setSessionId('')
+      setDeviceCode('')
+      setUserCode('')
+    }
+  }, [pollData, onToken])
+
+  // Handle expiry based on deadline
+  useEffect(() => {
+    if (!expiresAt) return
+    const timeout = setTimeout(() => {
+      if (Date.now() >= expiresAt && deviceCode) {
+        setError('Authorization expired. Please try again.')
+        setSessionId('')
+        setDeviceCode('')
+        setUserCode('')
+      }
+    }, expiresAt - Date.now())
+    return () => clearTimeout(timeout)
+  }, [expiresAt, deviceCode])
 
   const startAuth = async () => {
-    setLoading(true);
-    setError("");
-    setUserCode("");
+    setError('')
+    setUserCode('')
 
-    try {
-      const res = await fetch("/api/auth/device", { method: "POST" });
-      if (!res.ok) {
-        setError("Failed to start authentication.");
-        setLoading(false);
-        return;
-      }
+    initiate.mutate(undefined, {
+      onSuccess: (data) => {
+        setSessionId(data.session_id)
+        setDeviceCode(data.device_code)
+        setUserCode(data.user_code)
+        setExpiresAt(Date.now() + data.expires_in * 1000)
 
-      const { session_id, device_code, user_code, expires_in } = await res.json();
-
-      setUserCode(user_code);
-
-      // Open system browser to /link (no session_id in URL)
-      const origin = window.location.origin;
-      const linkUrl = `${origin}/link`;
-
-      if (typeof window.sendToPlugin === "function") {
-        window.sendToPlugin({ type: "open_browser", url: linkUrl });
-      } else {
-        window.open(linkUrl, "_blank");
-      }
-
-      // Poll for token
-      const deadline = Date.now() + expires_in * 1000;
-
-      pollingRef.current = setInterval(async () => {
-        if (Date.now() > deadline) {
-          stopPolling();
-          setError("Authorization expired. Please try again.");
-          setLoading(false);
-          setUserCode("");
-          return;
+        // Open system browser to /link
+        const linkUrl = `${window.location.origin}/link`
+        if (typeof window.sendToPlugin === 'function') {
+          window.sendToPlugin({ type: 'open_browser', url: linkUrl })
+        } else {
+          window.open(linkUrl, '_blank')
         }
-
-        try {
-          const tokenRes = await fetch("/api/auth/device/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id, device_code }),
-          });
-
-          if (!tokenRes.ok) return;
-
-          const data = await tokenRes.json();
-
-          if (data.status === "complete" && data.token) {
-            stopPolling();
-            onToken(data.token);
-          } else if (data.status === "expired") {
-            stopPolling();
-            setError("Session expired. Please try again.");
-            setLoading(false);
-            setUserCode("");
-          }
-        } catch {
-          // Network error, keep polling
-        }
-      }, 2000);
-    } catch {
-      setError("Connection error. Is the server running?");
-      setLoading(false);
-      setUserCode("");
-    }
-  };
+      },
+      onError: () => {
+        setError('Failed to start authentication.')
+      },
+    })
+  }
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-background">
@@ -103,8 +83,12 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
         </div>
 
         {!userCode ? (
-          <Button onClick={startAuth} className="w-full" disabled={loading}>
-            {loading ? "Starting..." : "Sign in with Browser"}
+          <Button
+            onClick={startAuth}
+            className="w-full"
+            disabled={initiate.isPending}
+          >
+            {initiate.isPending ? 'Starting...' : 'Sign in with Browser'}
           </Button>
         ) : (
           <div className="space-y-3">
@@ -125,5 +109,5 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
         )}
       </Card>
     </div>
-  );
+  )
 }
