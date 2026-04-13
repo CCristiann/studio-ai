@@ -202,7 +202,6 @@ export function PluginDashboard({
       <OnboardingWizard
         open={showOnboarding}
         onComplete={() => setShowOnboarding(false)}
-        token={token}
       />
     </TooltipProvider>
   );

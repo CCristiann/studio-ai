@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Zap, Sparkles } from "lucide-react";
+import { useUpdatePreferences } from '@/hooks/mutations/use-preferences-mutations'
 
 const steps = [
   {
@@ -35,34 +36,28 @@ const steps = [
 export function OnboardingWizard({
   open,
   onComplete,
-  token,
 }: {
   open: boolean;
   onComplete: () => void;
-  token: string;
 }) {
   const [step, setStep] = useState(0);
+  const updatePreferences = useUpdatePreferences()
 
   // Reset to first step when wizard reopens
   useEffect(() => {
     if (open) setStep(0);
   }, [open]);
 
-  const handleNext = async () => {
+  const handleNext = () => {
     if (step < steps.length - 1) {
-      setStep(step + 1);
+      setStep(step + 1)
     } else {
-      await fetch("/api/plugin/preferences", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ onboarding_completed: true }),
-      });
-      onComplete();
+      updatePreferences.mutate(
+        { onboarding_completed: true },
+        { onSuccess: () => onComplete() },
+      )
     }
-  };
+  }
 
   const current = steps[step];
 
