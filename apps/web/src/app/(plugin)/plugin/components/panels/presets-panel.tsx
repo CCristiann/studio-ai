@@ -1,87 +1,64 @@
-"use client";
+'use client'
 
-import { useEffect, useState, useCallback } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Plus } from "lucide-react";
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Plus } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-
-interface Preset {
-  id: string;
-  name: string;
-  description: string | null;
-  prompt: string;
-}
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { usePluginToken } from '@/hooks/use-plugin-auth'
+import { presetQueries } from '@/lib/query/queries/presets'
+import { useCreatePreset } from '@/hooks/mutations/use-preset-mutations'
 
 export function PresetsPanel({
-  token,
   onSendPrompt,
 }: {
-  token: string;
-  onSendPrompt: (prompt: string) => void;
+  onSendPrompt: (prompt: string) => void
 }) {
-  const [presets, setPresets] = useState<Preset[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [newPrompt, setNewPrompt] = useState("");
-  const [saving, setSaving] = useState(false);
+  const { token } = usePluginToken()
+  const { data: presets, isLoading } = useQuery(presetQueries.all(token ?? ''))
+  const createPreset = useCreatePreset()
 
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const [showCreate, setShowCreate] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newPrompt, setNewPrompt] = useState('')
 
-  const fetchPresets = useCallback(async () => {
-    const res = await fetch("/api/plugin/presets", { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) {
-      const data = await res.json();
-      setPresets(data.presets);
-    }
-    setLoading(false);
-  }, [token]);
+  const handleCreate = () => {
+    if (!newName.trim() || !newPrompt.trim()) return
+    createPreset.mutate(
+      { name: newName, description: newDescription || null, prompt: newPrompt },
+      {
+        onSuccess: () => {
+          setShowCreate(false)
+          setNewName('')
+          setNewDescription('')
+          setNewPrompt('')
+        },
+      },
+    )
+  }
 
-  useEffect(() => {
-    fetchPresets();
-  }, [fetchPresets]);
-
-  const handleCreate = async () => {
-    if (!newName.trim() || !newPrompt.trim()) return;
-    setSaving(true);
-    const res = await fetch("/api/plugin/presets", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name: newName, description: newDescription || null, prompt: newPrompt }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setPresets((prev) => [...prev, data.preset]);
-      setShowCreate(false);
-      setNewName("");
-      setNewDescription("");
-      setNewPrompt("");
-    }
-    setSaving(false);
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-2 p-3">
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-14 w-full rounded-xl" />
         ))}
       </div>
-    );
+    )
   }
 
   return (
     <div className="flex flex-col gap-1.5 p-2.5">
-      {presets.map((preset) => (
+      {presets?.map((preset) => (
         <button
           key={preset.id}
           onClick={() => onSendPrompt(preset.prompt)}
@@ -139,12 +116,16 @@ export function PresetsPanel({
                 placeholder="Set BPM to 85 and add drums, bass, and keys tracks"
               />
             </div>
-            <Button onClick={handleCreate} disabled={saving || !newName.trim() || !newPrompt.trim()} className="w-full">
-              {saving ? "Creating..." : "Create Preset"}
+            <Button
+              onClick={handleCreate}
+              disabled={createPreset.isPending || !newName.trim() || !newPrompt.trim()}
+              className="w-full"
+            >
+              {createPreset.isPending ? 'Creating...' : 'Create Preset'}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
     </div>
-  );
+  )
 }

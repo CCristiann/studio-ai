@@ -150,7 +150,7 @@ export function PluginDashboard({
       </div>
     ),
     connection: <ConnectionPanel status={pluginStatus} onRefresh={requestConnectionStatus} />,
-    presets: <PresetsPanel token={token} onSendPrompt={handleSendPrompt} />,
+    presets: <PresetsPanel onSendPrompt={handleSendPrompt} />,
     settings: (
       <SettingsPanel
         tokenExpiry={tokenExpiry}
