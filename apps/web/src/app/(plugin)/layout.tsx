@@ -1,3 +1,5 @@
+import { PluginAuthProvider } from '@/hooks/use-plugin-auth'
+
 export default function PluginLayout({
   children,
 }: {
@@ -5,7 +7,9 @@ export default function PluginLayout({
 }) {
   return (
     <div className="dark flex h-screen w-screen overflow-hidden bg-[#0a0a0a]">
-      {children}
+      <PluginAuthProvider>
+        {children}
+      </PluginAuthProvider>
     </div>
   );
 }
