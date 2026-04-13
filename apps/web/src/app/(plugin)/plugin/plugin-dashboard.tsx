@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useQuery } from '@tanstack/react-query'
+import { preferencesQueries } from '@/lib/query/queries/preferences'
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
@@ -91,18 +93,13 @@ export function PluginDashboard({
   }, [onAuthError]);
 
   // Check onboarding status
+  const { data: preferences } = useQuery(preferencesQueries.all(token))
+
   useEffect(() => {
-    fetch("/api/plugin/preferences", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data.preferences?.onboarding_completed) {
-          setShowOnboarding(true);
-        }
-      })
-      .catch(() => {});
-  }, [token]);
+    if (preferences && !preferences.onboarding_completed) {
+      setShowOnboarding(true)
+    }
+  }, [preferences])
 
   // Request connection status from plugin
   const requestConnectionStatus = useCallback(() => {
