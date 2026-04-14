@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { validateToken } from "@/lib/query/api/auth";
+import { ApiError } from "@/lib/query/errors";
 import { useQuery } from '@tanstack/react-query'
 import { preferencesQueries } from '@/lib/query/queries/preferences'
 import { useChat } from "@ai-sdk/react";
@@ -60,13 +62,12 @@ export function PluginDashboard({
     transport,
     async onError() {
       try {
-        const res = await fetch("/api/auth/plugin/validate", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) onAuthError();
-      } catch {
-        // Network error — don't force logout
+        await validateToken(token);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          onAuthError();
+        }
+        // Other errors (network) — don't force logout
       }
     },
   });
@@ -88,7 +89,6 @@ export function PluginDashboard({
   );
 
   const handleSignOut = useCallback(() => {
-    localStorage.removeItem("studio-ai-token");
     onAuthError();
   }, [onAuthError]);
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { usePluginToken } from '@/hooks/use-plugin-auth'
 import { authQueries } from '@/lib/query/queries/auth'
@@ -16,9 +17,11 @@ export default function PluginPage() {
   })
 
   // If validation fails, clear the token
-  if (isError && token) {
-    clearToken()
-  }
+  useEffect(() => {
+    if (isError && token) {
+      clearToken()
+    }
+  }, [isError, token, clearToken])
 
   if (!ready) return null
 
