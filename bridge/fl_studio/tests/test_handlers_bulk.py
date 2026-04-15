@@ -162,5 +162,124 @@ class UndoAndSaveTests(unittest.TestCase):
         self.assertIn(("saveProject", 0), self.mocks["general"].calls)
 
 
+class HybridScoringTests(unittest.TestCase):
+
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_bulk" in sys.modules:
+            importlib.reload(sys.modules["handlers_bulk"])
+        import handlers_bulk
+        self.handlers_bulk = handlers_bulk
+
+    def tearDown(self):
+        uninstall_fl_mocks()
+
+    def test_score_exact_match(self):
+        self.assertEqual(self.handlers_bulk._score("kick", "Kick"), 1.0)
+
+    def test_score_substring_boost_short_in_long(self):
+        # "kick" (4 chars) in "Kick Layer Sub" (14 chars) → 0.7 + 0.3*(4/14)
+        s = self.handlers_bulk._score("kick", "Kick Layer Sub")
+        self.assertGreaterEqual(s, 0.78)
+        self.assertLessEqual(s, 0.79)
+
+    def test_score_no_substring_falls_back_to_difflib(self):
+        # No substring; difflib produces something <0.7
+        s = self.handlers_bulk._score("zzzz", "abcdef")
+        self.assertLess(s, 0.7)
+
+    def test_score_empty_name(self):
+        self.assertEqual(self.handlers_bulk._score("anything", ""), 0.0)
+
+    def test_score_case_insensitive(self):
+        self.assertEqual(self.handlers_bulk._score("KICK", "kick"), 1.0)
+
+
+class FindByNameTests(unittest.TestCase):
+
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_bulk" in sys.modules:
+            importlib.reload(sys.modules["handlers_bulk"])
+        import handlers_bulk
+        self.handlers_bulk = handlers_bulk
+
+    def tearDown(self):
+        uninstall_fl_mocks()
+
+    def _seed_channels(self, names):
+        ch = self.mocks["channels"]
+        for i, n in enumerate(names):
+            ch.names[i] = n
+
+    def test_find_channel_basic_substring(self):
+        self._seed_channels(["Kick", "Snare", "Kick Layer", "Hat", "Bass"])
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick"})
+        names = [m["name"] for m in result["matches"]]
+        self.assertIn("Kick", names)
+        self.assertIn("Kick Layer", names)
+        self.assertNotIn("Snare", names)
+
+    def test_find_sorted_by_score_desc_then_index_asc(self):
+        # Two equal-score names → earlier index first
+        self._seed_channels(["Kick", "Snare", "Kick"])
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick"})
+        # Both "Kick" entries score 1.0; index 0 must precede index 2
+        kick_matches = [m for m in result["matches"] if m["name"] == "Kick"]
+        self.assertEqual([m["index"] for m in kick_matches], [0, 2])
+
+    def test_find_omits_below_cutoff(self):
+        self._seed_channels(["Snare", "Hat", "Bass"])
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick"})
+        self.assertEqual(result["matches"], [])
+
+    def test_find_default_limit_is_5(self):
+        self._seed_channels(["Kick"] * 10)
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick"})
+        self.assertEqual(len(result["matches"]), 5)
+
+    def test_find_explicit_limit(self):
+        self._seed_channels(["Kick"] * 10)
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick", "limit": 2})
+        self.assertEqual(len(result["matches"]), 2)
+
+    def test_find_empty_query_returns_empty(self):
+        self._seed_channels(["Kick", "Snare"])
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": ""})
+        self.assertEqual(result["matches"], [])
+
+    def test_find_mixer_track_uses_zero_indexed_iteration(self):
+        mx = self.mocks["mixer"]
+        mx._track_count = 3
+        mx.names = {0: "Master", 1: "Drums Bus", 2: "Bass Bus"}
+        result = self.handlers_bulk._cmd_find_mixer_track_by_name({"query": "drums"})
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["index"], 1)
+
+    def test_find_playlist_track_uses_one_indexed_iteration(self):
+        pl = self.mocks["playlist"]
+        pl._track_count = 3
+        pl.names = {1: "Verse", 2: "Chorus", 3: "Bridge"}
+        result = self.handlers_bulk._cmd_find_playlist_track_by_name({"query": "verse"})
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["index"], 1)  # 1-indexed
+
+    def test_find_handles_throwing_getter(self):
+        # Simulate a getter that raises on one index
+        ch = self.mocks["channels"]
+        ch.names = {0: "Kick", 1: "Snare"}
+        def getChannelName(i):
+            if i == 1:
+                raise RuntimeError("simulated FL hiccup")
+            return ch.names.get(i, "")
+        ch.getChannelName = getChannelName
+        result = self.handlers_bulk._cmd_find_channel_by_name({"query": "kick"})
+        # Index 1 was skipped; "Kick" still found
+        names = [m["name"] for m in result["matches"]]
+        self.assertIn("Kick", names)
+
+
 if __name__ == "__main__":
     unittest.main()

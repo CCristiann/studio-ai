@@ -138,8 +138,87 @@ def _cmd_save_project(_params):
     return {"saved": True}
 
 
+def _score(query, name):
+    """Hybrid match: substring boost + difflib SequenceMatcher fallback.
+
+    Pure SequenceMatcher.ratio is too strict for the dominant query case
+    where the user types one word and expects to match a longer name
+    (e.g. "kick" vs "Kick Layer Sub"). Substring matches earn a 0.7
+    baseline, scaled up by query coverage of the candidate.
+    """
+    q = (query or "").lower()
+    n = (name or "").lower()
+    if not n:
+        return 0.0
+    if q in n:
+        return round(0.7 + 0.3 * (len(q) / len(n)), 3)
+    return round(difflib.SequenceMatcher(None, q, n).ratio(), 3)
+
+
+def _rank_matches(query, candidates, limit, cutoff=FIND_SCORE_CUTOFF):
+    """Score candidates against query, sort, return top N above cutoff."""
+    scored = []
+    for index, name in candidates:
+        s = _score(query, name)
+        if s >= cutoff:
+            scored.append({"index": index, "name": name, "score": s})
+    scored.sort(key=lambda m: (-m["score"], m["index"]))
+    return scored[:limit]
+
+
+def _cmd_find_channel_by_name(params):
+    import channels
+    query = str((params or {}).get("query", "")).strip()
+    limit = int((params or {}).get("limit", 5))
+    if not query:
+        return {"matches": []}
+    candidates = []
+    for i in range(channels.channelCount()):
+        try:
+            name = channels.getChannelName(i) or ""
+        except Exception:
+            continue
+        candidates.append((i, name))
+    return {"matches": _rank_matches(query, candidates, limit)}
+
+
+def _cmd_find_mixer_track_by_name(params):
+    import mixer
+    query = str((params or {}).get("query", "")).strip()
+    limit = int((params or {}).get("limit", 5))
+    if not query:
+        return {"matches": []}
+    candidates = []
+    for i in range(mixer.trackCount()):
+        try:
+            name = mixer.getTrackName(i) or ""
+        except Exception:
+            continue
+        candidates.append((i, name))
+    return {"matches": _rank_matches(query, candidates, limit)}
+
+
+def _cmd_find_playlist_track_by_name(params):
+    import playlist
+    query = str((params or {}).get("query", "")).strip()
+    limit = int((params or {}).get("limit", 5))
+    if not query:
+        return {"matches": []}
+    candidates = []
+    for i in range(1, playlist.trackCount() + 1):  # 1-indexed
+        try:
+            name = playlist.getTrackName(i) or ""
+        except Exception:
+            continue
+        candidates.append((i, name))
+    return {"matches": _rank_matches(query, candidates, limit)}
+
+
 BULK_HANDLERS = {
-    "apply_organization_plan": _cmd_apply_organization_plan,
-    "undo":                    _cmd_undo,
-    "save_project":            _cmd_save_project,
+    "apply_organization_plan":      _cmd_apply_organization_plan,
+    "undo":                         _cmd_undo,
+    "save_project":                 _cmd_save_project,
+    "find_channel_by_name":         _cmd_find_channel_by_name,
+    "find_mixer_track_by_name":     _cmd_find_mixer_track_by_name,
+    "find_playlist_track_by_name":  _cmd_find_playlist_track_by_name,
 }
