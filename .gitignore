@@ -38,3 +38,6 @@ plugin/target/
 
 # OS
 Thumbs.db
+
+# Claude Code worktrees
+.claude/worktrees/
