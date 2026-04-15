@@ -10,7 +10,6 @@ fake to simulate specific FL state or to assert calls.
 """
 import sys
 import types
-from collections import defaultdict
 
 
 def _make_general_mock():
@@ -275,5 +274,6 @@ def install_fl_mocks():
 
 
 def uninstall_fl_mocks():
+    """Remove all FL module mocks (and stubs) from sys.modules."""
     for name in ("general", "channels", "mixer", "playlist", "patterns", "midi", "transport"):
         sys.modules.pop(name, None)
