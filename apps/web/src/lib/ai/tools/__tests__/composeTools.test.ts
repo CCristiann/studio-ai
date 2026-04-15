@@ -7,17 +7,12 @@ vi.mock("@/lib/relay", () => ({
 }));
 
 // organize.ts pulls in heavy modules; mock them so the import doesn't crash
-vi.mock("@/lib/ai/organize/analysis-agent", () => ({ runAnalysis: vi.fn() }));
 vi.mock("@/lib/ai/organize/organization-agent", () => ({
   runOrganization: vi.fn(),
   runScaffold: vi.fn(),
   adjustPlan: vi.fn(),
 }));
 vi.mock("@/lib/ai/organize/expand-plan", () => ({ expandPlan: vi.fn() }));
-vi.mock("@/lib/ai/organize/execute-plan", () => ({
-  executePlan: vi.fn(),
-  validateStateBeforeExecution: vi.fn(),
-}));
 
 import { composeTools } from "../index";
 

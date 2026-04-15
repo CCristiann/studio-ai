@@ -2,11 +2,24 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { verifyPluginToken } from "@/lib/plugin-auth";
 import { rateLimit } from "@/lib/rate-limit";
-import { runAnalysis } from "@/lib/ai/organize/analysis-agent";
+import { relay } from "@/lib/relay";
 import { runOrganization, runScaffold, adjustPlan } from "@/lib/ai/organize/organization-agent";
 import { expandPlan } from "@/lib/ai/organize/expand-plan";
-import { executePlan, validateStateBeforeExecution } from "@/lib/ai/organize/execute-plan";
-import type { AIPlan, EnhancedProjectState } from "@studio-ai/types";
+import type { AIPlan, EnhancedProjectState, ProjectMap } from "@studio-ai/types";
+
+function projectStateToMap(state: EnhancedProjectState): ProjectMap {
+  return {
+    channels: state.channels.map((c) => ({
+      index: c.index,
+      currentName: c.name,
+      plugin: c.plugin,
+      inferredRole: "unknown",
+      roleGroup: "other" as const,
+      confidence: "low" as const,
+      reasoning: "Role deferred to organization-agent",
+    })),
+  };
+}
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
@@ -46,7 +59,12 @@ export async function POST(req: Request) {
     const { action } = body;
 
     if (action === "analyze") {
-      const { projectMap, projectState } = await runAnalysis(userId);
+      const stateResult = await relay(userId, "get_project_state", {});
+      if (!stateResult.success) {
+        return NextResponse.json({ error: stateResult.error ?? "Could not read project state" }, { status: 502 });
+      }
+      const projectState = stateResult.data as EnhancedProjectState;
+      const projectMap = projectStateToMap(projectState);
       const aiPlan = await runOrganization(projectMap, projectState);
       const fullPlan = expandPlan(aiPlan, projectState);
 
@@ -118,19 +136,40 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "plan is required" }, { status: 400 });
       }
 
-      const validation = await validateStateBeforeExecution(userId, channelCount);
-      if (!validation.valid) {
-        return NextResponse.json({
-          success: false,
-          error: "stale_state",
-          message: `Project changed since analysis. Expected ${channelCount} channels, found ${validation.currentChannelCount}. Please re-analyze.`,
-        }, { status: 409 });
+      // Validate that channel count hasn't changed since analysis.
+      const currentStateResult = await relay(userId, "get_project_state", {});
+      if (currentStateResult.success) {
+        const currentState = currentStateResult.data as EnhancedProjectState;
+        if (currentState.channels.length !== channelCount) {
+          return NextResponse.json({
+            success: false,
+            error: "stale_state",
+            message: `Project changed since analysis. Expected ${channelCount} channels, found ${currentState.channels.length}. Please re-analyze.`,
+          }, { status: 409 });
+        }
       }
 
       const fullPlan = expandPlan(aiPlan, projectState);
-      const result = await executePlan(userId, fullPlan);
 
-      return NextResponse.json({ success: result.failures.length === 0, result });
+      // Fold actions into bulk-apply shape.
+      const channelMap = new Map<number, { index: number; name?: string; color?: number; insert?: number }>();
+      for (const a of fullPlan.actions) {
+        const idx = (a.params as any).index;
+        if (typeof idx !== "number") continue;
+        const existing = channelMap.get(idx) ?? { index: idx };
+        if (a.type === "rename_channel") existing.name = (a.params as any).name;
+        else if (a.type === "set_channel_color") existing.color = (a.params as any).color;
+        else if (a.type === "set_channel_insert") existing.insert = (a.params as any).insert;
+        channelMap.set(idx, existing);
+      }
+      const bulkPlan = { channels: [...channelMap.values()] };
+      const applyResult = await relay(userId, "apply_organization_plan", bulkPlan);
+
+      if (!applyResult.success) {
+        return NextResponse.json({ success: false, error: applyResult.error }, { status: 502 });
+      }
+      const data = applyResult.data as { applied: Record<string, number>; errors: unknown[] };
+      return NextResponse.json({ success: data.errors.length === 0, result: data });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
