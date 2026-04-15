@@ -7,7 +7,7 @@ export function projectTools(userId: string) {
     get_project_state: relayTool(userId, {
       description: "Get the current state of the DAW project including BPM, tracks, and project name. Use this once at the start of any organize task to learn the project layout.",
       inputSchema: z.object({}),
-      toRelay: () => ({ action: "get_state", params: {} }),
+      toRelay: () => ({ action: "get_project_state", params: {} }),
     }),
 
     save_project: relayTool(userId, {

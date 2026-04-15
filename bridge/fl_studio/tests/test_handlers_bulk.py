@@ -78,12 +78,12 @@ class ApplyOrganizationPlanTests(unittest.TestCase):
         self.assertTrue(result["undo_grouped"])
         self.assertEqual(result["op_count"], 2)  # name + color
 
-    def test_plan_too_large_returns_early(self):
-        # 2001 items total
-        plan = {"channels": [{"index": i, "name": f"c{i}"} for i in range(2001)]}
-        result = self.handlers_bulk._cmd_apply_organization_plan(plan)
-        self.assertFalse(result.get("success", True))
-        self.assertEqual(result.get("error"), "PLAN_TOO_LARGE")
+    def test_plan_too_large_raises_value_error(self):
+        # 2001 items total — must raise so the dispatch loop surfaces an error response
+        plan = {"channels": [{"index": i, "name": "c{}".format(i)} for i in range(2001)]}
+        with self.assertRaises(ValueError) as ctx:
+            self.handlers_bulk._cmd_apply_organization_plan(plan)
+        self.assertIn("PLAN_TOO_LARGE", str(ctx.exception))
         # Bridge must not have touched FL
         self.assertEqual(self.mocks["channels"].calls, [])
         self.assertEqual(self.mocks["general"].calls, [])

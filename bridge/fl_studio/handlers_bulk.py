@@ -41,16 +41,12 @@ def _cmd_apply_organization_plan(params):
         for k in ("channels", "mixer_tracks", "playlist_tracks", "patterns")
     )
     if total_items > PLAN_ITEM_CAP:
-        return {
-            "success": False,
-            "error": "PLAN_TOO_LARGE",
-            "limit": PLAN_ITEM_CAP,
-            "got": total_items,
-            "suggestion": (
-                "Plan has {} items, exceeds {} cap. "
-                "Split into smaller batches (each its own undo step)."
-            ).format(total_items, PLAN_ITEM_CAP),
-        }
+        raise ValueError(
+            "PLAN_TOO_LARGE: {} items exceeds {} cap. "
+            "Split into smaller batches (each its own undo step).".format(
+                total_items, PLAN_ITEM_CAP
+            )
+        )
 
     applied = {"channels": 0, "mixer_tracks": 0, "playlist_tracks": 0, "patterns": 0}
     errors = []
