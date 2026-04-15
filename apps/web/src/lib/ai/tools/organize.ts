@@ -5,52 +5,8 @@ import { relay } from "@/lib/relay";
 import { relayTool } from "./_shared";
 import { runOrganization, runScaffold } from "@/lib/ai/organize/organization-agent";
 import { expandPlan } from "@/lib/ai/organize/expand-plan";
-import type { EnhancedProjectState, ProjectMap } from "@studio-ai/types";
-
-/**
- * Convert an EnhancedProjectState (from get_project_state) into the simpler
- * ProjectMap shape that the organization agent's prompt expects.
- *
- * Replaces the deleted analysis-agent.ts which used a separate Gemini call to
- * derive role classifications. The new flow defers role inference to the
- * organization-agent itself; this function just packages the raw state.
- */
-function projectStateToMap(state: EnhancedProjectState): ProjectMap {
-  return {
-    channels: state.channels.map((c) => ({
-      index: c.index,
-      currentName: c.name,
-      plugin: c.plugin,
-      inferredRole: "unknown",
-      roleGroup: "other" as const,
-      confidence: "low" as const,
-      reasoning: "Role deferred to organization-agent",
-    })),
-  };
-}
-
-/**
- * Convert a legacy AIPlan (channelAssignments + routingFixes) into the new
- * apply_organization_plan envelope shape.
- */
-function aiPlanToBulkPlan(aiPlan: ReturnType<typeof expandPlan>) {
-  // expandPlan returns { actions: [...], preview: {...} }
-  // Each action is { type, params }. Fold into the bulk-apply shape.
-  const channels: Array<{ index: number; name?: string; color?: number; insert?: number }> = [];
-  const channelMap = new Map<number, { index: number; name?: string; color?: number; insert?: number }>();
-
-  for (const a of aiPlan.actions) {
-    const idx = (a.params as any).index;
-    if (typeof idx !== "number") continue;
-    const existing = channelMap.get(idx) ?? { index: idx };
-    if (a.type === "rename_channel") existing.name = (a.params as any).name;
-    else if (a.type === "set_channel_color") existing.color = (a.params as any).color;
-    else if (a.type === "set_channel_insert") existing.insert = (a.params as any).insert;
-    channelMap.set(idx, existing);
-  }
-  channels.push(...channelMap.values());
-  return { channels };
-}
+import { projectStateToMap, aiPlanToBulkPlan } from "@/lib/ai/organize/_shared";
+import type { EnhancedProjectState } from "@studio-ai/types";
 
 export function organizeTools(userId: string) {
   return {

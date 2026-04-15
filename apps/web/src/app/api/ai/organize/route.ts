@@ -5,21 +5,8 @@ import { rateLimit } from "@/lib/rate-limit";
 import { relay } from "@/lib/relay";
 import { runOrganization, runScaffold, adjustPlan } from "@/lib/ai/organize/organization-agent";
 import { expandPlan } from "@/lib/ai/organize/expand-plan";
-import type { AIPlan, EnhancedProjectState, ProjectMap } from "@studio-ai/types";
-
-function projectStateToMap(state: EnhancedProjectState): ProjectMap {
-  return {
-    channels: state.channels.map((c) => ({
-      index: c.index,
-      currentName: c.name,
-      plugin: c.plugin,
-      inferredRole: "unknown",
-      roleGroup: "other" as const,
-      confidence: "low" as const,
-      reasoning: "Role deferred to organization-agent",
-    })),
-  };
-}
+import { projectStateToMap, aiPlanToBulkPlan } from "@/lib/ai/organize/_shared";
+import type { AIPlan, EnhancedProjectState } from "@studio-ai/types";
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
@@ -150,19 +137,7 @@ export async function POST(req: Request) {
       }
 
       const fullPlan = expandPlan(aiPlan, projectState);
-
-      // Fold actions into bulk-apply shape.
-      const channelMap = new Map<number, { index: number; name?: string; color?: number; insert?: number }>();
-      for (const a of fullPlan.actions) {
-        const idx = (a.params as any).index;
-        if (typeof idx !== "number") continue;
-        const existing = channelMap.get(idx) ?? { index: idx };
-        if (a.type === "rename_channel") existing.name = (a.params as any).name;
-        else if (a.type === "set_channel_color") existing.color = (a.params as any).color;
-        else if (a.type === "set_channel_insert") existing.insert = (a.params as any).insert;
-        channelMap.set(idx, existing);
-      }
-      const bulkPlan = { channels: [...channelMap.values()] };
+      const bulkPlan = aiPlanToBulkPlan(fullPlan);
       const applyResult = await relay(userId, "apply_organization_plan", bulkPlan);
 
       if (!applyResult.success) {
