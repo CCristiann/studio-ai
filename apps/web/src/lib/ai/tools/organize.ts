@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { relay } from "@/lib/relay";
+import { relayTool } from "./_shared";
 import { runAnalysis } from "@/lib/ai/organize/analysis-agent";
 import { runOrganization, runScaffold } from "@/lib/ai/organize/organization-agent";
 import { expandPlan } from "@/lib/ai/organize/expand-plan";
@@ -9,6 +10,34 @@ import type { EnhancedProjectState } from "@studio-ai/types";
 
 export function organizeTools(userId: string) {
   return {
+    apply_organization_plan: relayTool(userId, {
+      description: "Apply a structured rename + recolor + (channel only) insert-routing plan in a single FL Studio undo step. Use this for any organize task that touches more than 3 entities — it's one round-trip and one Ctrl+Z to revert. Each section is optional; omit sections you don't need to touch. Item fields are independent (you can pass name, color, or both). The whole apply registers as one undo step. If the response has `undo_grouped: false`, then `undo` must be called with `count: <op_count>` to fully revert.",
+      inputSchema: z.object({
+        channels: z.array(z.object({
+          index: z.number().int().min(0).max(999).describe("0-indexed channel rack entry"),
+          name:  z.string().min(1).max(128).optional(),
+          color: z.number().int().min(0).max(0xFFFFFF).optional(),
+          insert: z.number().int().min(0).max(126).optional().describe("Target mixer insert"),
+        })).optional(),
+        mixer_tracks: z.array(z.object({
+          index: z.number().int().min(0).max(126).describe("0-indexed mixer track (0=Master, 1-125=Inserts, 126=Current)"),
+          name:  z.string().min(1).max(128).optional(),
+          color: z.number().int().min(0).max(0xFFFFFF).optional(),
+        })).optional(),
+        playlist_tracks: z.array(z.object({
+          index: z.number().int().min(1).max(500).describe("1-indexed playlist track"),
+          name:  z.string().min(1).max(128).optional(),
+          color: z.number().int().min(0).max(0xFFFFFF).optional(),
+        })).optional(),
+        patterns: z.array(z.object({
+          index: z.number().int().min(1).max(999).describe("1-indexed pattern"),
+          name:  z.string().min(1).max(128).optional(),
+          color: z.number().int().min(0).max(0xFFFFFF).optional(),
+        })).optional(),
+      }),
+      toRelay: (plan) => ({ action: "apply_organization_plan", params: plan }),
+    }),
+
     organize_project: tool({
       description: "Analyze and organize the current FL Studio project. Reads the project state, classifies channels by musical role (drums, bass, leads, pads, fx, vocals), then renames and color-codes everything consistently. Shows a preview before applying. Use when the user asks to organize, clean up, or color-code their project.",
       inputSchema: z.object({

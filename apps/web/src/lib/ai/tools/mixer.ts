@@ -1,20 +1,34 @@
+// apps/web/src/lib/ai/tools/mixer.ts
 import { z } from "zod";
 import { relayTool } from "./_shared";
 
 const MX_INDEX = z.number().int().min(0).max(126).describe("Mixer track index (0=Master, 1-125=Inserts, 126=Current)");
+const COLOR_RGB = z.number().int().min(0).max(0xFFFFFF).describe("24-bit RGB color");
 
 export function mixerTools(userId: string) {
   return {
+    rename_mixer_track: relayTool(userId, {
+      description: "Rename a single mixer track. For many at once, prefer apply_organization_plan.",
+      inputSchema: z.object({
+        index: MX_INDEX,
+        name: z.string().min(1).max(128).describe("New name (1-128 chars)"),
+      }),
+      toRelay: ({ index, name }) => ({ action: "rename_mixer_track", params: { index, name } }),
+    }),
+
+    set_mixer_track_color: relayTool(userId, {
+      description: "Set the color of a single mixer track (24-bit RGB).",
+      inputSchema: z.object({ index: MX_INDEX, color: COLOR_RGB }),
+      toRelay: ({ index, color }) => ({ action: "set_mixer_track_color", params: { index, color } }),
+    }),
+
     set_track_volume: relayTool(userId, {
       description: "Set a mixer track's volume level.",
       inputSchema: z.object({
         index: MX_INDEX,
         volume: z.number().min(0).max(1).describe("Volume level (0.0 to 1.0)"),
       }),
-      toRelay: ({ index, volume }) => ({
-        action: "set_track_volume",
-        params: { index, volume },
-      }),
+      toRelay: ({ index, volume }) => ({ action: "set_track_volume", params: { index, volume } }),
     }),
 
     set_mixer_routing: relayTool(userId, {
@@ -43,6 +57,15 @@ export function mixerTools(userId: string) {
         action: "set_mixer_eq",
         params: { index, band, gain, freq, bw },
       }),
+    }),
+
+    find_mixer_track_by_name: relayTool(userId, {
+      description: "Find mixer tracks by name (fuzzy substring match). Returns up to `limit` matches sorted by score. Use to resolve user references like \"the drum bus\".",
+      inputSchema: z.object({
+        query: z.string().min(1).max(128),
+        limit: z.number().int().min(1).max(20).optional().default(5),
+      }),
+      toRelay: ({ query, limit }) => ({ action: "find_mixer_track_by_name", params: { query, limit } }),
     }),
   };
 }

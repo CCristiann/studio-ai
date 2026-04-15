@@ -27,19 +27,34 @@ describe("composeTools", () => {
     const names = Object.keys(tools).sort();
     // Pinned: changing this list is a public-contract change. Update intentionally.
     expect(names).toEqual([
+      "apply_organization_plan",
+      "find_channel_by_name",
+      "find_mixer_track_by_name",
+      "find_playlist_track_by_name",
       "get_project_state",
       "organize_project",
       "play",
+      "rename_channel",
+      "rename_mixer_track",
+      "rename_pattern",
+      "rename_playlist_track",
+      "save_project",
       "scaffold_project",
       "set_bpm",
+      "set_channel_color",
       "set_channel_enabled",
+      "set_channel_insert",
       "set_channel_pan",
       "set_channel_volume",
       "set_mixer_eq",
       "set_mixer_routing",
+      "set_mixer_track_color",
+      "set_pattern_color",
       "set_pitch",
+      "set_playlist_track_color",
       "set_track_volume",
       "stop",
+      "undo",
     ]);
   });
 
