@@ -43,36 +43,49 @@ Six new tools. Granular per-item commands stay so the AI can still do `"rename c
 
 All schemas authored in Zod. Indexing conventions are preserved per FL Studio's API: channels and mixer 0-indexed; playlist and patterns 1-indexed.
 
+**Range source:** FL Studio 20+ public limits, cross-checked against `mixer.trackCount()` (returns 127 in FL 20+: Master=0, Inserts=1–125, Current=126), `playlist.trackCount()` (500), `patterns.patternCount()` (999), and `channels.channelCount()` (no documented hard cap; 999 chosen as a defensive upper rail). The Zod bounds are pre-validation rails to catch obvious LLM mistakes early; the bridge re-validates against actual project state at runtime.
+
+Hex constants used: `MAX_MIXER = 126`, `MAX_PLAYLIST = 500`, `MAX_PATTERN = 999`, `MAX_CHANNEL = 999`, `MAX_COLOR = 0xFFFFFF`, `MAX_NAME_LEN = 128`.
+
 ### 4.1 `apply_organization_plan`
 
 ```ts
 inputSchema: z.object({
   channels: z.array(z.object({
-    index: z.number().int().min(0),
-    name:  z.string().min(1).max(128).optional(),  // min(1): never accidentally clear
+    index: z.number().int().min(0).max(999),                          // 0-indexed
+    name:  z.string().min(1).max(128).optional(),                     // min(1): never accidentally clear
     color: z.number().int().min(0).max(0xFFFFFF).optional(),
-    insert: z.number().int().min(0).optional(),  // mixer insert routing
+    insert: z.number().int().min(0).max(126).optional(),              // mixer insert routing target
   })).optional(),
 
   mixer_tracks: z.array(z.object({
-    index: z.number().int().min(0),
+    index: z.number().int().min(0).max(126),                          // 0=Master, 1-125=Inserts, 126=Current
     name:  z.string().min(1).max(128).optional(),
     color: z.number().int().min(0).max(0xFFFFFF).optional(),
   })).optional(),
 
   playlist_tracks: z.array(z.object({
-    index: z.number().int().min(1),  // 1-indexed
+    index: z.number().int().min(1).max(500),                          // 1-indexed, FL 20+ caps at 500
     name:  z.string().min(1).max(128).optional(),
     color: z.number().int().min(0).max(0xFFFFFF).optional(),
   })).optional(),
 
   patterns: z.array(z.object({
-    index: z.number().int().min(1),  // 1-indexed
+    index: z.number().int().min(1).max(999),                          // 1-indexed
     name:  z.string().min(1).max(128).optional(),
     color: z.number().int().min(0).max(0xFFFFFF).optional(),
   })).optional(),
 })
 ```
+
+**Plan size limit (5s relay timeout):**
+
+The bulk apply runs through `apps/api` → WebSocket → bridge with a hard **5-second relay timeout** (see [Relay Service](../../../obsidian-studio-ai/wiki/components/relay-service.md)). At measured ~1ms per FL setter call:
+
+- Worst-case full plan (500 playlist + 999 patterns + 999 channels + 126 mixer, all with rename + color) = **~5,248 calls × ~1ms = ~5.2s** — over budget.
+- Realistic full plan (500 + 100 + 200 + 50 with rename + color) = **~1,700 calls = ~1.7s** — comfortable.
+
+The bridge enforces a soft cap inside the handler: if the total item count exceeds **2,000 items**, the apply returns `{ success: false, error: "PLAN_TOO_LARGE", suggestion: "Split the plan into smaller batches." }` immediately, without touching FL. The system prompt instructs the AI to chunk plans above 2,000 items into multiple sequential applies (each in its own undo step — the user can still revert chunk-by-chunk).
 
 **Response shape:**
 
@@ -123,7 +136,7 @@ Same shape across channels / mixer / playlist:
 ```ts
 find_*_by_name: {
   inputSchema: z.object({
-    query: z.string().min(1),
+    query: z.string().min(1).max(128),
     limit: z.number().int().min(1).max(20).optional().default(5),
   }),
   execute: () => relay("find_*_by_name", { query, limit })
@@ -137,17 +150,41 @@ Response:
   matches: Array<{
     index: number,
     name:  string,
-    score: number,  // 0.0–1.0 (difflib SequenceMatcher ratio)
+    score: number,  // 0.0–1.0 (hybrid: substring boost + difflib ratio)
   }>
 }
 ```
 
+**Scoring algorithm** (hybrid — pure `difflib.SequenceMatcher.ratio` is too strict for the dominant query case where the user types one word and expects to match longer names):
+
+```python
+def _score(query: str, name: str) -> float:
+    q = query.lower()
+    n = name.lower()
+    # Substring match: high baseline, scaled by coverage of the candidate.
+    if q in n:
+        return round(0.7 + 0.3 * (len(q) / max(len(n), 1)), 3)
+    # Otherwise fall back to difflib ratio.
+    return round(difflib.SequenceMatcher(None, q, n).ratio(), 3)
+```
+
+Examples (cutoff 0.6):
+
+| Query | Candidate | Pure ratio | Hybrid score | Match? |
+|---|---|---|---|---|
+| `kick` | `Kick` | 1.000 | 1.000 | ✓ |
+| `kick` | `Kick Layer` | 0.571 | 0.820 | ✓ |
+| `kick` | `Kick Layer Sub` | 0.444 | 0.786 | ✓ |
+| `kick` | `Snare` | 0.000 | 0.000 | ✗ |
+| `bass` | `Sub Bass 808` | 0.500 | 0.800 | ✓ |
+| `vox` | `Lead Vocal` | 0.000 | 0.000 | ✗ (no substring; might warrant returning suggestions later) |
+
 **Semantics:**
 
-- Cutoff `0.6` (difflib default). Below cutoff → omitted entirely (not returned with low score).
+- Cutoff `0.6`. Below cutoff → omitted entirely (not returned with low score).
 - Sorted by score descending, ties broken by index ascending.
-- If `matches.length === 0`, the AI should ask the user to clarify, not guess.
-- If `matches.length > 1` with similar scores (within 0.05 of top), the AI should ask the user to disambiguate before acting.
+- If `matches.length === 0`, the AI asks the user to clarify, never guesses.
+- If `matches.length > 1` with similar scores (within `0.05` of top), the AI asks the user to disambiguate before acting.
 
 ## 5. Bridge (Python) Implementation
 
@@ -169,20 +206,54 @@ from handlers_organize import (
 )
 
 UNDO_LABEL = "Studio AI: Organize"
+PLAN_ITEM_CAP = 2000              # hard cap to stay under 5s relay timeout
+FIND_SCORE_CUTOFF = 0.6           # below this, omit entirely
 
 
 def _cmd_apply_organization_plan(params):
-    """Apply a structured plan in a single FL undo step."""
+    """Apply a structured plan in a single FL undo step.
+
+    Returns:
+      { applied: {section: count}, errors: [...], undo_label: str,
+        undo_grouped: bool, op_count: int }
+
+    `undo_grouped=False` means general.saveUndo was unavailable on this FL
+    version — the AI should issue `undo` `op_count` times to fully revert.
+    """
     import general
 
     plan = params or {}
+
+    # Item-cap guardrail before touching FL (5s relay timeout protection).
+    total_items = sum(len(plan.get(k) or []) for k in
+                      ("channels", "mixer_tracks", "playlist_tracks", "patterns"))
+    if total_items > PLAN_ITEM_CAP:
+        return {
+            "success": False,
+            "error": "PLAN_TOO_LARGE",
+            "limit": PLAN_ITEM_CAP,
+            "got": total_items,
+            "suggestion": (
+                f"Plan has {total_items} items, exceeds {PLAN_ITEM_CAP} cap. "
+                "Split into smaller batches (each its own undo step)."
+            ),
+        }
+
     applied = {"channels": 0, "mixer_tracks": 0, "playlist_tracks": 0, "patterns": 0}
     errors = []
+    op_count = 0
 
-    # Group everything under a single undo entry.
-    general.saveUndo(UNDO_LABEL, 0)
+    # Group everything under a single undo entry IF saveUndo is available.
+    # Older FL versions (<20) lack saveUndo; degrade gracefully.
+    undo_grouped = hasattr(general, "saveUndo")
+    if undo_grouped:
+        try:
+            general.saveUndo(UNDO_LABEL, 0)
+        except Exception:
+            undo_grouped = False  # FL refused; fall back
 
     def _apply_section(section_key, items, field_handlers):
+        nonlocal op_count
         for item in items or []:
             try:
                 idx = int(item["index"])
@@ -196,6 +267,7 @@ def _cmd_apply_organization_plan(params):
                     try:
                         handler({"index": idx, field: item[field]})
                         touched = True
+                        op_count += 1
                     except Exception as e:
                         errors.append({"entity": section_key, "index": idx,
                                        "field": field, "message": str(e)})
@@ -220,16 +292,32 @@ def _cmd_apply_organization_plan(params):
         "color": lambda p: _cmd_set_pattern_color({"index": p["index"], "color": p["color"]}),
     })
 
-    return {"applied": applied, "errors": errors, "undo_label": UNDO_LABEL}
+    return {
+        "applied": applied,
+        "errors": errors,
+        "undo_label": UNDO_LABEL,
+        "undo_grouped": undo_grouped,
+        "op_count": op_count,
+    }
 
 
-def _cmd_undo(_params):
+def _cmd_undo(params):
+    """Undo the most recent FL action.
+
+    If params.count is provided (used when undo_grouped=False from a prior
+    apply), undoUp is called that many times. Default 1.
+    """
     import general
-    general.undoUp()
-    return {"undone": True}
+    count = max(1, int((params or {}).get("count", 1)))
+    for _ in range(count):
+        general.undoUp()
+    return {"undone": True, "steps": count}
 
 
 def _cmd_save_project(_params):
+    """Save the current FL project. mode=0 = save in-place (silent if a path
+    is set; FL prompts the user only for an untitled project).
+    """
     import general
     general.saveProject(0)
     return {"saved": True}
@@ -237,7 +325,7 @@ def _cmd_save_project(_params):
 
 def _cmd_find_channel_by_name(params):
     import channels
-    query = str(params.get("query", "")).strip().lower()
+    query = str(params.get("query", "")).strip()
     limit = int(params.get("limit", 5))
     if not query:
         return {"matches": []}
@@ -253,7 +341,7 @@ def _cmd_find_channel_by_name(params):
 
 def _cmd_find_mixer_track_by_name(params):
     import mixer
-    query = str(params.get("query", "")).strip().lower()
+    query = str(params.get("query", "")).strip()
     limit = int(params.get("limit", 5))
     if not query:
         return {"matches": []}
@@ -269,7 +357,7 @@ def _cmd_find_mixer_track_by_name(params):
 
 def _cmd_find_playlist_track_by_name(params):
     import playlist
-    query = str(params.get("query", "")).strip().lower()
+    query = str(params.get("query", "")).strip()
     limit = int(params.get("limit", 5))
     if not query:
         return {"matches": []}
@@ -283,13 +371,25 @@ def _cmd_find_playlist_track_by_name(params):
     return {"matches": _rank_matches(query, candidates, limit)}
 
 
-def _rank_matches(query, candidates, limit, cutoff=0.6):
+def _score(query: str, name: str) -> float:
+    """Hybrid match: substring boost (covers single-word queries against
+    multi-word names) + difflib SequenceMatcher fallback."""
+    q = query.lower()
+    n = name.lower()
+    if not n:
+        return 0.0
+    if q in n:
+        return round(0.7 + 0.3 * (len(q) / len(n)), 3)
+    return round(difflib.SequenceMatcher(None, q, n).ratio(), 3)
+
+
+def _rank_matches(query, candidates, limit, cutoff=FIND_SCORE_CUTOFF):
     """Score candidates against query, sort, return top N above cutoff."""
     scored = []
     for index, name in candidates:
-        score = difflib.SequenceMatcher(None, query, name.lower()).ratio()
-        if score >= cutoff:
-            scored.append({"index": index, "name": name, "score": round(score, 3)})
+        s = _score(query, name)
+        if s >= cutoff:
+            scored.append({"index": index, "name": name, "score": s})
     scored.sort(key=lambda m: (-m["score"], m["index"]))
     return scored[:limit]
 
