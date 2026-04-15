@@ -47,6 +47,7 @@ import device
 
 from _protocol import encode_sysex, decode_sysex, TAG_CMD, TAG_RESP
 from handlers_organize import ORGANIZE_HANDLERS
+from handlers_bulk import BULK_HANDLERS
 
 try:
     from ipc_transport import transport as _transport
@@ -323,6 +324,7 @@ _HANDLERS = {
     "set_track_solo": _cmd_set_track_solo,
     "rename_track": _cmd_rename_track,
     **ORGANIZE_HANDLERS,
+    **BULK_HANDLERS,
 }
 
 

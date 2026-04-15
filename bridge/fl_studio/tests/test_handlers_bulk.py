@@ -281,5 +281,35 @@ class FindByNameTests(unittest.TestCase):
         self.assertIn("Kick", names)
 
 
+class HandlerRegistryTests(unittest.TestCase):
+    """Pin the public action names of BULK_HANDLERS — these are the relay
+    contracts the web app ships against. A rename here is a breaking change.
+    """
+
+    def setUp(self):
+        install_fl_mocks()
+        import importlib
+        if "handlers_bulk" in sys.modules:
+            importlib.reload(sys.modules["handlers_bulk"])
+        import handlers_bulk
+        self.handlers_bulk = handlers_bulk
+
+    def tearDown(self):
+        uninstall_fl_mocks()
+
+    def test_bulk_handlers_action_names(self):
+        self.assertEqual(
+            sorted(self.handlers_bulk.BULK_HANDLERS.keys()),
+            [
+                "apply_organization_plan",
+                "find_channel_by_name",
+                "find_mixer_track_by_name",
+                "find_playlist_track_by_name",
+                "save_project",
+                "undo",
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
