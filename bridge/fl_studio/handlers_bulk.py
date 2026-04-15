@@ -116,6 +116,30 @@ def _cmd_apply_organization_plan(params):
     }
 
 
+def _cmd_undo(params):
+    """Undo the most recent FL action.
+
+    If params.count is provided (used when undo_grouped=False from a prior
+    apply), undoUp is called that many times. Default 1.
+    """
+    import general
+    count = max(1, int((params or {}).get("count", 1)))
+    for _ in range(count):
+        general.undoUp()
+    return {"undone": True, "steps": count}
+
+
+def _cmd_save_project(_params):
+    """Save the current FL project. mode=0 = save in-place (silent if a path
+    is set; FL prompts the user only for an untitled project).
+    """
+    import general
+    general.saveProject(0)
+    return {"saved": True}
+
+
 BULK_HANDLERS = {
     "apply_organization_plan": _cmd_apply_organization_plan,
+    "undo":                    _cmd_undo,
+    "save_project":            _cmd_save_project,
 }

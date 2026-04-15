@@ -121,5 +121,46 @@ class ApplyOrganizationPlanTests(unittest.TestCase):
         self.assertIn(("setPatternName", 1, "pat1"), self.mocks["patterns"].calls)
 
 
+class UndoAndSaveTests(unittest.TestCase):
+
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_organize" in sys.modules:
+            importlib.reload(sys.modules["handlers_organize"])
+        if "handlers_bulk" in sys.modules:
+            importlib.reload(sys.modules["handlers_bulk"])
+        import handlers_bulk
+        self.handlers_bulk = handlers_bulk
+
+    def tearDown(self):
+        uninstall_fl_mocks()
+
+    def test_undo_default_count_one(self):
+        result = self.handlers_bulk._cmd_undo({})
+        self.assertEqual(result, {"undone": True, "steps": 1})
+        undos = [c for c in self.mocks["general"].calls if c[0] == "undoUp"]
+        self.assertEqual(len(undos), 1)
+
+    def test_undo_with_count(self):
+        result = self.handlers_bulk._cmd_undo({"count": 3})
+        self.assertEqual(result, {"undone": True, "steps": 3})
+        undos = [c for c in self.mocks["general"].calls if c[0] == "undoUp"]
+        self.assertEqual(len(undos), 3)
+
+    def test_undo_count_clamps_to_at_least_one(self):
+        result = self.handlers_bulk._cmd_undo({"count": 0})
+        self.assertEqual(result["steps"], 1)
+
+    def test_undo_handles_none_params(self):
+        result = self.handlers_bulk._cmd_undo(None)
+        self.assertEqual(result["steps"], 1)
+
+    def test_save_project_calls_save_with_zero(self):
+        result = self.handlers_bulk._cmd_save_project({})
+        self.assertEqual(result, {"saved": True})
+        self.assertIn(("saveProject", 0), self.mocks["general"].calls)
+
+
 if __name__ == "__main__":
     unittest.main()
