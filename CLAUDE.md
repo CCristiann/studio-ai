@@ -47,17 +47,11 @@ Do not migrate these without explicit discussion.
 - Design: `docs/superpowers/specs/2026-04-14-tanstack-query-design.md`
 - Plan: `docs/superpowers/plans/2026-04-14-tanstack-query.md`
 
-## Deferred follow-ups (TanStack Query migration)
-
-Reference by ID when asking me to apply one:
-
-- **Fix I3** — `/api/auth/plugin/validate` contract: handle soft-revocation (`{ valid: false }` with HTTP 200). Either make `validateToken()` throw `ApiError(401)` when `valid === false`, or check `data.valid` in the consumer at `app/(plugin)/plugin/page.tsx`.
-- **Fix I4** — `presets-panel.tsx:26` passes `token ?? ''` as a defensive fallback. Clean up: either guard at the call site with `usePluginToken().token && useQuery(...)` or change `presetQueries.all` to accept `string | null`.
-- **Fix I5** — `plugin-login.tsx` has two expiry handlers (server-reported `status === 'expired'` effect + client-side `setTimeout` on `expiresAt`). Collapse into one path.
-- **Fix M1** — `api/presets.ts` and `api/preferences.ts` each define an identical inline `authFetch`. Extract to `lib/query/api/_http.ts` (internal).
-- **Fix M5** — Consider setting `refetchOnWindowFocus: false` (globally or per-query) for the plugin panel — users frequently tab in/out, and stale-while-revalidate may be unnecessary.
+## Future work
 
 When the dashboard (`app/(dashboard)/dashboard/`) gains interactive features that need client-side queries, apply the same three-layer pattern.
+
+_All deferred follow-ups from the 2026-04-14 migration audit (I3, I4, I5, M1, M5) are shipped — see commits on `main` and the 2026-04-15 security-audit session note in the vault._
 
 ## Conventions
 
