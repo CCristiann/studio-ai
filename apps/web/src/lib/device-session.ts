@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "./supabase";
+import { recordAuthEvent } from "./auth-events";
 import { randomUUID, randomBytes, createHash } from "crypto";
 
 const DEVICE_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
@@ -94,6 +95,13 @@ export async function approveDeviceSession(sessionId: string, userId: string) {
     .gt("expires_at", new Date().toISOString());
 
   if (error) throw new Error(`Failed to approve device session: ${error.message}`);
+
+  await recordAuthEvent({
+    type: "device_code_approved",
+    userId,
+    sessionId,
+    success: true,
+  });
 }
 
 export async function deleteDeviceSession(sessionId: string) {

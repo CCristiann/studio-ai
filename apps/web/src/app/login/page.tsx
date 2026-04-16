@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import { headers } from "next/headers";
 import { signIn } from "@/lib/auth";
+import { recordAuthEvent } from "@/lib/auth-events";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,11 +13,32 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; context?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; context?: string; error?: string }>;
 }) {
+  const params = await searchParams;
+
+  // NextAuth redirects here with ?error=<code> on OAuth failures. Record
+  // it for the audit trail. We skip prefetch requests (which trigger
+  // server renders but don't represent a user actually seeing the error).
+  if (params.error) {
+    const hdrs = await headers();
+    const isPrefetch = hdrs.get("next-router-prefetch") !== null
+      || hdrs.get("purpose") === "prefetch";
+    if (!isPrefetch) {
+      await recordAuthEvent({
+        type: "login_failed",
+        success: false,
+        reason: params.error,
+        ip: hdrs.get("x-forwarded-for")?.split(",")[0]?.trim()
+          ?? hdrs.get("x-real-ip"),
+        userAgent: hdrs.get("user-agent"),
+      });
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 px-4">
       <Card className="w-full max-w-sm">

@@ -7,6 +7,7 @@ import {
   type CryptoKey,
 } from "jose";
 import { createSupabaseServerClient } from "./supabase";
+import { recordAuthEvent } from "./auth-events";
 
 const ISSUER = "studio-ai";
 const AUDIENCE = "studio-ai-plugin";
@@ -57,6 +58,14 @@ export async function signPluginToken(userId: string): Promise<string> {
   if (error) {
     throw new Error(`Failed to store plugin token: ${error.message}`);
   }
+
+  // Fire-and-forget audit event. recordAuthEvent never throws.
+  await recordAuthEvent({
+    type: "plugin_token_issued",
+    userId,
+    jti,
+    success: true,
+  });
 
   return new SignJWT({ userId, jti })
     .setProtectedHeader({ alg: SIGN_ALG, kid: SIGN_KID })
@@ -118,4 +127,11 @@ export async function revokePluginTokensForUser(userId: string): Promise<void> {
     .update({ revoked: true })
     .eq("user_id", userId)
     .eq("revoked", false);
+
+  await recordAuthEvent({
+    type: "plugin_token_revoked",
+    userId,
+    success: true,
+    reason: "sign_out",
+  });
 }
