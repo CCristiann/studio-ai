@@ -100,6 +100,64 @@ def test_ws_subscription_expired(client):
             }))
 
 
+@pytest.mark.asyncio
+async def test_check_subscription_no_row_denies():
+    """Audit fix H1: missing subscription row must deny, not fall through to free tier."""
+    from routers.websocket import check_subscription
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json = MagicMock(return_value=[])
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("routers.websocket.httpx.AsyncClient", return_value=mock_client):
+        result = await check_subscription("user-with-no-row")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_subscription_active_row_allows():
+    from routers.websocket import check_subscription
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json = MagicMock(return_value=[{"status": "active"}])
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("routers.websocket.httpx.AsyncClient", return_value=mock_client):
+        result = await check_subscription("user-active")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_subscription_canceled_denies():
+    from routers.websocket import check_subscription
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json = MagicMock(return_value=[{"status": "canceled"}])
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("routers.websocket.httpx.AsyncClient", return_value=mock_client):
+        result = await check_subscription("user-canceled")
+
+    assert result is False
+
+
 def test_ws_response_resolves_future(client):
     with patch("routers.websocket.check_subscription", return_value=True):
         with client.websocket_connect("/ws") as ws:
@@ -114,4 +172,48 @@ def test_ws_response_resolves_future(client):
                 "id": "msg-1",
                 "type": "response",
                 "payload": {"success": True, "data": {"bpm": 120}},
+            }))
+
+
+# ── Handshake auth (ADR 2026-04-15-ws-handshake-auth) ──
+
+
+def test_ws_handshake_auth_success(client):
+    """Authorization header in the handshake authenticates the connection without a first-message."""
+    token = make_token()
+    with patch("routers.websocket.check_subscription", return_value=True):
+        with client.websocket_connect(
+            "/ws", headers={"Authorization": f"Bearer {token}"}
+        ) as ws:
+            ws.send_text(json.dumps({
+                "type": "heartbeat",
+                "id": "hb-1",
+                "payload": {"timestamp": int(time.time())},
+            }))
+
+
+def test_ws_handshake_auth_bad_token_rejected(client):
+    """Bad token in handshake must close before accept."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/ws", headers={"Authorization": "Bearer not-a-real-token"}
+        ) as ws:
+            ws.receive_text()
+
+
+def test_ws_handshake_auth_skips_first_message(client):
+    """When handshake auth wins, server should NOT wait for a first-message auth."""
+    token = make_token()
+    with patch("routers.websocket.check_subscription", return_value=True):
+        with client.websocket_connect(
+            "/ws", headers={"Authorization": f"Bearer {token}"}
+        ) as ws:
+            # Send a non-auth message immediately. If the server were still
+            # gating on first-message auth, it would close us with code 4001.
+            ws.send_text(json.dumps({
+                "id": "msg-1",
+                "type": "response",
+                "payload": {"success": True},
             }))

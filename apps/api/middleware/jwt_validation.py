@@ -1,10 +1,13 @@
 """JWT validation for WebSocket and HTTP authentication.
 
 Supports two token formats:
-1. Plugin JWTs signed by Next.js (iss: "studio-ai", aud: "studio-ai-plugin", userId claim)
-2. Supabase JWTs (aud: "authenticated", sub: user_id)
+1. Plugin JWTs signed by Next.js (iss: "studio-ai", aud: "studio-ai-plugin", userId claim).
+   - RS256 (current, ADR 2026-04-15) — verified with PLUGIN_JWT_PUBLIC_KEY.
+   - HS256 (legacy, cutover window) — verified with NEXTAUTH_SECRET.
+2. Supabase JWTs (aud: "authenticated", sub: user_id).
 
-Strategy: peek at unverified claims to choose the right secret, then verify fully.
+Strategy: peek at unverified header.alg + unverified claims to choose the right
+verification path, then verify fully.
 """
 
 import jwt
@@ -42,21 +45,42 @@ def validate_jwt(token: str) -> dict:
     settings = get_settings()
 
     if _is_plugin_token(token):
-        return _validate_plugin_token(token, settings.nextauth_secret)
+        return _validate_plugin_token(token, settings)
 
     return _validate_supabase_token(token, settings.supabase_jwt_secret)
 
 
-def _validate_plugin_token(token: str, secret: str) -> dict:
-    """Validate a plugin JWT signed with NEXTAUTH_SECRET."""
-    if not secret:
-        raise JWTValidationError("NEXTAUTH_SECRET not configured", "SERVER_ERROR")
+def _validate_plugin_token(token: str, settings) -> dict:
+    """Validate a plugin JWT.
+
+    RS256 (PLUGIN_JWT_PUBLIC_KEY) is the current path. HS256 (NEXTAUTH_SECRET)
+    is accepted for the cutover window — drop once all in-flight HS256 tokens
+    have expired (≤24h after migration).
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.DecodeError:
+        raise JWTValidationError("Token decode failed", "INVALID_TOKEN")
+
+    alg = header.get("alg")
+    if alg == "RS256":
+        key = settings.plugin_jwt_public_key
+        if not key:
+            raise JWTValidationError("PLUGIN_JWT_PUBLIC_KEY not configured", "SERVER_ERROR")
+        algorithms = ["RS256"]
+    elif alg == "HS256":
+        key = settings.nextauth_secret
+        if not key:
+            raise JWTValidationError("NEXTAUTH_SECRET not configured", "SERVER_ERROR")
+        algorithms = ["HS256"]
+    else:
+        raise JWTValidationError(f"Unsupported alg: {alg}", "INVALID_TOKEN")
 
     try:
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=["HS256"],
+            key,
+            algorithms=algorithms,
             issuer="studio-ai",
             audience="studio-ai-plugin",
         )

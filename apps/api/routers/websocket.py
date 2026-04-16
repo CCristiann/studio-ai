@@ -1,5 +1,6 @@
 """WebSocket endpoint for plugin connections."""
 
+import asyncio
 import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -15,6 +16,10 @@ router = APIRouter()
 # WebSocket close codes
 WS_CLOSE_AUTH_FAILED = 4001
 WS_CLOSE_SUBSCRIPTION_EXPIRED = 4003
+
+# Bound the first-message-auth fallback to limit unauthenticated socket
+# lifetime (DoS surface). The handshake-auth path skips this entirely.
+LEGACY_AUTH_TIMEOUT_SECONDS = 5.0
 
 
 async def check_subscription(user_id: str) -> bool:
@@ -35,52 +40,84 @@ async def check_subscription(user_id: str) -> bool:
 
         data = response.json()
         if not data:
-            # No subscription record — allow (free tier)
-            return True
+            # No subscription row — deny. New users get a free/active row
+            # provisioned by the next_auth.users INSERT trigger
+            # (migration 009). A missing row means provisioning failed
+            # or the user was created before the trigger existed.
+            logger.warning("No subscription row for user %s — denying", user_id)
+            return False
 
-        status = data[0].get("status", "")
-        return status in ("active",)
+        return data[0].get("status") == "active"
+
+
+def _extract_bearer_token(ws: WebSocket) -> str | None:
+    """Return the bearer token from the Authorization header, or None if absent."""
+    header = ws.headers.get("authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip() or None
+    return None
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """Plugin WebSocket connection endpoint.
 
-    Protocol:
-    1. Accept connection
-    2. First message must be: { "type": "auth", "payload": { "token": "jwt" } }
-    3. Validate JWT -> extract user_id
-    4. Check subscription status via Supabase
-    5. Close 4001 if auth fails, 4003 if subscription expired
-    6. Register in ConnectionManager
-    7. Receive loop: heartbeat -> renew, response -> resolve, error -> resolve
+    Auth resolution order:
+    1. Handshake auth — `Authorization: Bearer <jwt>` in the upgrade request.
+       Validated **before** `accept()`. Invalid token → close pre-accept (HTTP 403).
+       This is the path new plugin builds use.
+    2. Legacy first-message auth — only attempted if no Authorization header is
+       present. Tightened with a 5s timeout so unauthenticated sockets cannot
+       hold resources indefinitely. Drop after the plugin handshake-auth
+       release reaches all installed users.
+
+    After auth: subscription check → register in ConnectionManager → receive loop.
     """
-    await ws.accept()
+    handshake_token = _extract_bearer_token(ws)
+
+    user_id: str | None = None
+
+    if handshake_token is not None:
+        # Handshake-auth path: validate before accept so bad tokens never
+        # consume an accepted-socket slot.
+        try:
+            payload = validate_jwt(handshake_token)
+            user_id = payload["sub"]
+        except JWTValidationError as e:
+            logger.warning("Handshake auth failed: %s", e.message)
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=e.message)
+            return
+        await ws.accept()
+    else:
+        # Legacy first-message-auth path. Strict 5s timeout bounds
+        # the unauthenticated socket lifetime.
+        await ws.accept()
+        try:
+            raw = await asyncio.wait_for(
+                ws.receive_text(), timeout=LEGACY_AUTH_TIMEOUT_SECONDS
+            )
+            message = json.loads(raw)
+        except asyncio.TimeoutError:
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Auth timeout")
+            return
+        except (WebSocketDisconnect, json.JSONDecodeError):
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Invalid auth message")
+            return
+
+        if message.get("type") != "auth" or "payload" not in message:
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Expected auth message")
+            return
+
+        token = message["payload"].get("token", "")
+        try:
+            payload = validate_jwt(token)
+            user_id = payload["sub"]
+        except JWTValidationError as e:
+            logger.warning("First-message auth failed: %s", e.message)
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=e.message)
+            return
 
     manager: ConnectionManager = ws.app.state.manager
-
-    # Step 1: Wait for auth message
-    try:
-        raw = await ws.receive_text()
-        message = json.loads(raw)
-    except (WebSocketDisconnect, json.JSONDecodeError):
-        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Invalid auth message")
-        return
-
-    if message.get("type") != "auth" or "payload" not in message:
-        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Expected auth message")
-        return
-
-    token = message["payload"].get("token", "")
-
-    # Step 2: Validate JWT
-    try:
-        payload = validate_jwt(token)
-        user_id = payload["sub"]
-    except JWTValidationError as e:
-        logger.warning("Auth failed: %s", e.message)
-        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=e.message)
-        return
 
     # Step 3: Check subscription
     has_subscription = await check_subscription(user_id)
