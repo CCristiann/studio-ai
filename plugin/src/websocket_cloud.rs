@@ -7,7 +7,14 @@
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval, sleep};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        http::HeaderValue,
+        Message,
+    },
+};
 
 use crate::pipe_ipc;
 use crate::state::SharedState;
@@ -39,9 +46,39 @@ pub async fn run(shared_state: SharedState) {
             state.update_connection_state();
         }
 
-        let ws_stream = match connect_async(&ws_url).await {
+        // Handshake auth: send the JWT in the Authorization header so the
+        // server can reject before the upgrade completes (no DoS surface
+        // from holding unauthenticated sockets). See ADR
+        // 2026-04-15-ws-handshake-auth.
+        let request = match (&ws_url).into_client_request() {
+            Ok(mut req) => {
+                match HeaderValue::from_str(&format!("Bearer {}", token)) {
+                    Ok(value) => {
+                        req.headers_mut().insert("Authorization", value);
+                        req
+                    }
+                    Err(e) => {
+                        log::error!("Invalid token for Authorization header: {}", e);
+                        sleep(backoff).await;
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to build WS request: {}", e);
+                sleep(backoff).await;
+                backoff = (backoff * 2).min(MAX_BACKOFF);
+                continue;
+            }
+        };
+
+        let ws_stream = match connect_async(request).await {
             Ok((stream, _)) => stream,
             Err(e) => {
+                // 401 / 403 here = JWT rejected pre-accept by the relay.
+                // Token-level errors won't recover by retrying — but transient
+                // network errors will, so the standard backoff loop continues.
                 log::error!("Cloud WS connection failed: {}", e);
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -52,19 +89,6 @@ pub async fn run(shared_state: SharedState) {
         backoff = Duration::from_secs(1);
 
         let (mut write, mut read) = ws_stream.split();
-
-        // Send auth message
-        let auth_msg = serde_json::json!({
-            "type": "auth",
-            "payload": { "token": token }
-        });
-        if let Err(e) = write.send(Message::Text(auth_msg.to_string())).await {
-            log::error!("Failed to send auth: {}", e);
-            continue;
-        }
-
-        // Wait briefly for server to close if auth fails (100ms)
-        tokio::time::sleep(Duration::from_millis(100)).await;
 
         {
             let mut state = shared_state.lock().unwrap();
