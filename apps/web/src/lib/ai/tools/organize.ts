@@ -8,6 +8,24 @@ import { expandPlan } from "@/lib/ai/organize/expand-plan";
 import { projectStateToMap, aiPlanToBulkPlan } from "@/lib/ai/organize/_shared";
 import type { EnhancedProjectState } from "@studio-ai/types";
 
+/**
+ * Why these tools no longer apply directly:
+ *
+ * Originally `organize_project` and `scaffold_project` had a `confirm` flag —
+ * `false` returned a preview, `true` applied. Problem: each `execute` call
+ * re-ran Gemini (`runOrganization` / `runScaffold`), so the plan the user
+ * approved in step 1 was *not* the plan that got applied in step 2. The
+ * second call generated a fresh, slightly-different plan from scratch.
+ *
+ * Fix: both tools are now *plan generators*. They always return a structured
+ * `plan` field shaped like `apply_organization_plan`'s input. The AI shows
+ * the preview, gets confirmation, then calls `apply_organization_plan` with
+ * the exact plan returned here. One generation, one apply, no drift.
+ *
+ * Side benefit: the bridge round-trip moves out of these tools entirely,
+ * so they only need `get_project_state` for scaffold's channel-count check.
+ */
+
 export function organizeTools(userId: string) {
   return {
     apply_organization_plan: relayTool(userId, {
@@ -39,11 +57,9 @@ export function organizeTools(userId: string) {
     }),
 
     organize_project: tool({
-      description: "[Legacy] Analyze and organize the current FL Studio project. Prefer the new flow: call get_project_state, build a plan in chat, then call apply_organization_plan. This tool is retained for backwards compatibility.",
-      inputSchema: z.object({
-        confirm: z.boolean().default(false).describe("Set to true to apply the plan after previewing."),
-      }),
-      execute: async (input) => {
+      description: "Generate an AI-suggested organization plan for the current FL Studio project (groupings, names, colors). Returns a `plan` field — show the `preview` to the user, get confirmation, then call `apply_organization_plan` with the returned `plan` to actually apply it. This tool does NOT apply changes itself.",
+      inputSchema: z.object({}),
+      execute: async () => {
         try {
           const stateResult = await relay(userId, "get_project_state", {});
           if (!stateResult.success) {
@@ -53,26 +69,13 @@ export function organizeTools(userId: string) {
           const projectMap = projectStateToMap(projectState);
           const aiPlan = await runOrganization(projectMap, projectState);
           const fullPlan = expandPlan(aiPlan, projectState);
-          if (!input.confirm) {
-            return {
-              success: true,
-              status: "preview",
-              preview: fullPlan.preview,
-              actionCount: fullPlan.actions.length,
-            };
-          }
-          // Apply via the new bulk path instead of action-at-a-time relay calls.
           const bulkPlan = aiPlanToBulkPlan(fullPlan);
-          const applyResult = await relay(userId, "apply_organization_plan", bulkPlan);
-          if (!applyResult.success) {
-            return { success: false, error: applyResult.error };
-          }
-          const data = applyResult.data as { applied: Record<string, number>; errors: unknown[] };
           return {
-            success: data.errors.length === 0,
-            status: "applied",
-            applied: data.applied,
-            errors: data.errors,
+            success: true,
+            status: "ready_to_apply",
+            preview: fullPlan.preview,
+            actionCount: fullPlan.actions.length,
+            plan: bulkPlan,
           };
         } catch (e) {
           return { success: false, error: e instanceof Error ? e.message : "Organization failed" };
@@ -81,10 +84,9 @@ export function organizeTools(userId: string) {
     }),
 
     scaffold_project: tool({
-      description: "Set up a new FL Studio project template based on a genre or style. Renames and color-codes the existing channels in the project to match the genre. Note: FL Studio cannot add channels programmatically, so the template is limited to the number of channels already in the project.",
+      description: "Generate a starter project template for a given genre (rename + color the existing channels). Returns a `plan` field — show the `preview` to the user, get confirmation, then call `apply_organization_plan` with the returned `plan` to actually apply it. This tool does NOT apply changes itself. Note: FL Studio cannot add channels programmatically, so the template is limited to the channels already in the project.",
       inputSchema: z.object({
         genre: z.string().describe("Genre or style description, e.g. 'trap beat', 'lo-fi hip hop', 'dark drill with 808s'"),
-        confirm: z.boolean().default(false).describe("Set to true to apply the template after previewing."),
       }),
       execute: async (input) => {
         try {
@@ -106,34 +108,20 @@ export function organizeTools(userId: string) {
               .map((a, i) => ({ ...a, index: projectState.channels[i].index })),
           };
           const fullPlan = expandPlan(trimmedPlan, projectState);
-
-          if (!input.confirm) {
-            const skipped = aiPlan.channelAssignments.length - trimmedPlan.channelAssignments.length;
-            return {
-              success: true,
-              status: "preview",
-              genre: input.genre,
-              preview: fullPlan.preview,
-              actionCount: fullPlan.actions.length,
-              channelsAvailable: channelCount,
-              channelsRequested: aiPlan.channelAssignments.length,
-              ...(skipped > 0 && {
-                note: `Your project has ${channelCount} channels but the template needs ${aiPlan.channelAssignments.length}. ${skipped} channels were skipped. Add more channels in FL Studio first if you want the full template.`,
-              }),
-            };
-          }
           const bulkPlan = aiPlanToBulkPlan(fullPlan);
-          const applyResult = await relay(userId, "apply_organization_plan", bulkPlan);
-          if (!applyResult.success) {
-            return { success: false, error: applyResult.error };
-          }
-          const data = applyResult.data as { applied: Record<string, number>; errors: unknown[] };
+          const skipped = aiPlan.channelAssignments.length - trimmedPlan.channelAssignments.length;
           return {
-            success: data.errors.length === 0,
-            status: "applied",
+            success: true,
+            status: "ready_to_apply",
             genre: input.genre,
-            applied: data.applied,
-            errors: data.errors,
+            preview: fullPlan.preview,
+            actionCount: fullPlan.actions.length,
+            channelsAvailable: channelCount,
+            channelsRequested: aiPlan.channelAssignments.length,
+            plan: bulkPlan,
+            ...(skipped > 0 && {
+              note: `Your project has ${channelCount} channels but the template needs ${aiPlan.channelAssignments.length}. ${skipped} channels were skipped. Add more channels in FL Studio first if you want the full template.`,
+            }),
           };
         } catch (e) {
           return { success: false, error: e instanceof Error ? e.message : "Scaffold failed" };

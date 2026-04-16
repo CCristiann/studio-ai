@@ -26,9 +26,6 @@ def _make_general_mock():
     def undoUp():
         mod.calls.append(("undoUp",))
 
-    def saveProject(mode):
-        mod.calls.append(("saveProject", mode))
-
     def getProjectTitle():
         return "TestProject"
 
@@ -37,7 +34,6 @@ def _make_general_mock():
 
     mod.saveUndo = saveUndo
     mod.undoUp = undoUp
-    mod.saveProject = saveProject
     mod.getProjectTitle = getProjectTitle
     mod.processRECEvent = processRECEvent
     return mod

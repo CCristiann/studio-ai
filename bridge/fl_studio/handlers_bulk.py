@@ -1,5 +1,5 @@
 # bridge/fl_studio/handlers_bulk.py
-"""Bulk apply, undo, save, find-by-name handlers for Studio AI.
+"""Bulk apply, undo, find-by-name handlers for Studio AI.
 
 Imported by device_studio_ai.py via:
     from handlers_bulk import BULK_HANDLERS
@@ -125,15 +125,6 @@ def _cmd_undo(params):
     return {"undone": True, "steps": count}
 
 
-def _cmd_save_project(_params):
-    """Save the current FL project. mode=0 = save in-place (silent if a path
-    is set; FL prompts the user only for an untitled project).
-    """
-    import general
-    general.saveProject(0)
-    return {"saved": True}
-
-
 def _score(query, name):
     """Hybrid match: substring boost + difflib SequenceMatcher fallback.
 
@@ -213,7 +204,6 @@ def _cmd_find_playlist_track_by_name(params):
 BULK_HANDLERS = {
     "apply_organization_plan":      _cmd_apply_organization_plan,
     "undo":                         _cmd_undo,
-    "save_project":                 _cmd_save_project,
     "find_channel_by_name":         _cmd_find_channel_by_name,
     "find_mixer_track_by_name":     _cmd_find_mixer_track_by_name,
     "find_playlist_track_by_name":  _cmd_find_playlist_track_by_name,

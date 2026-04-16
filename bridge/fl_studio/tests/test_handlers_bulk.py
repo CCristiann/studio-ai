@@ -156,11 +156,6 @@ class UndoAndSaveTests(unittest.TestCase):
         result = self.handlers_bulk._cmd_undo(None)
         self.assertEqual(result["steps"], 1)
 
-    def test_save_project_calls_save_with_zero(self):
-        result = self.handlers_bulk._cmd_save_project({})
-        self.assertEqual(result, {"saved": True})
-        self.assertIn(("saveProject", 0), self.mocks["general"].calls)
-
 
 class HybridScoringTests(unittest.TestCase):
 
@@ -305,7 +300,6 @@ class HandlerRegistryTests(unittest.TestCase):
                 "find_channel_by_name",
                 "find_mixer_track_by_name",
                 "find_playlist_track_by_name",
-                "save_project",
                 "undo",
             ],
         )

@@ -19,14 +19,23 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _cmd_get_project_state(params):
-    """Return a comprehensive snapshot of the current FL Studio project.
+    """Return a snapshot of *user-touched* project entities.
 
     Includes:
-      - channels    : channel rack entries (0-indexed)
-      - mixer_tracks: mixer inserts (0-indexed)
-      - playlist_tracks: playlist track names / colors (1-indexed)
-      - patterns    : pattern names / colors (1-indexed)
+      - channels    : channel rack entries (0-indexed) — always all
+      - mixer_tracks: only Master (0) + tracks with a custom name OR custom color
+      - playlist_tracks: only tracks with a custom name OR custom color
+      - patterns    : only patterns with a custom name OR custom color
       - bpm, project_name, playing
+
+    Why filter: FL allocates 127 mixer tracks + 500 playlist tracks + many
+    pattern slots by default. Returning all of them on every call (a) blows
+    past the 5s relay timeout on slower machines, and (b) drowns the AI in
+    noise. For organize tasks the AI only cares about what the user has
+    actually named or colored. Default-named slots ("Insert N", "Track N",
+    "Pattern N") with a default color are skipped.
+
+    Channels are always included because they exist iff the user added them.
     """
     import general
     import mixer
@@ -38,6 +47,19 @@ def _cmd_get_project_state(params):
     bpm = float(mixer.getCurrentTempo()) / 1000.0
     project_name = general.getProjectTitle() or "Untitled"
     is_playing = transport.isPlaying()
+
+    def _is_default_mixer_name(name, idx):
+        if not name:
+            return True
+        if idx == 0 and name == "Master":
+            return False  # Master is meaningful — keep it
+        return name.startswith("Insert ") or name == "Current"
+
+    def _is_default_playlist_name(name):
+        return not name or name.startswith("Track ")
+
+    def _is_default_pattern_name(name):
+        return not name or name.startswith("Pattern ")
 
     # ── Channel Rack ──────────────────────────────────────────────────────────
     channel_list = []
@@ -63,13 +85,16 @@ def _cmd_get_project_state(params):
             # Skip channels that raise (e.g. out-of-range during enumeration)
             pass
 
-    # ── Mixer tracks ──────────────────────────────────────────────────────────
+    # ── Mixer tracks (filter default-named uncolored slots) ───────────────────
     mixer_list = []
     mx_count = mixer.trackCount()
     for i in range(mx_count):
         try:
             name = mixer.getTrackName(i) or ""
             color = mixer.getTrackColor(i) & 0xFFFFFF
+            # Skip cheaply before any extra getters fire.
+            if i != 0 and _is_default_mixer_name(name, i) and color == 0:
+                continue
             volume = round(mixer.getTrackVolume(i), 3)
             pan = round(mixer.getTrackPan(i), 3)
             muted = bool(mixer.isTrackMuted(i))
@@ -84,13 +109,15 @@ def _cmd_get_project_state(params):
         except Exception:
             pass
 
-    # ── Playlist tracks (1-indexed) ───────────────────────────────────────────
+    # ── Playlist tracks (1-indexed; filter defaults) ──────────────────────────
     playlist_list = []
     pl_count = playlist.trackCount()
     for i in range(1, pl_count + 1):
         try:
             name = playlist.getTrackName(i) or ""
             color = playlist.getTrackColor(i) & 0xFFFFFF
+            if _is_default_playlist_name(name) and color == 0:
+                continue
             playlist_list.append({
                 "index": i,
                 "name": name,
@@ -99,13 +126,15 @@ def _cmd_get_project_state(params):
         except Exception:
             pass
 
-    # ── Patterns (1-indexed) ──────────────────────────────────────────────────
+    # ── Patterns (1-indexed; filter defaults) ─────────────────────────────────
     pattern_list = []
     pat_count = patterns.patternCount()
     for i in range(1, pat_count + 1):
         try:
             name = patterns.getPatternName(i) or ""
             color = patterns.getPatternColor(i) & 0xFFFFFF
+            if _is_default_pattern_name(name) and color == 0:
+                continue
             pattern_list.append({
                 "index": i,
                 "name": name,

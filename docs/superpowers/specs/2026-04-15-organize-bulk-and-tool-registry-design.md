@@ -727,3 +727,36 @@ After this lands, file in `obsidian-studio-ai/wiki/`:
 - **Index update**: register all three above in `index.md`.
 
 Use the `vault-maintain` skill to file these.
+
+## 13. Smoke Test Results (2026-04-16)
+
+**Environment**
+- FL Studio version: 21.x macOS (channels/mixer 0-indexed, playlist/patterns 1-indexed; pipe IPC transport)
+- Plugin build SHA: `0aa72d165287888cbb36139091bd1cb4b2300f8a` (pre-fixes); follow-up commit lands the fixes documented below
+- Test project: empty starter (~5 channels, default mixer, no custom playlist tracks/patterns) — not the spec's 50-channel target, because the empty-project path was where bugs surfaced first
+
+**Fixes that landed during smoke test** (in order discovered)
+
+1. **`general.saveProject` does not exist** on the tested FL build (per-version drift in the FL Python API). Per user direction "if the save project is not possible with midi scripting just remove it," the entire `save_project` path was deleted: bridge handler, conftest mock, registry test, web tool, system-prompt mention, and `composeTools` snapshot. 28/28 bridge tests + 2/2 composeTools tests still green. **Spec impact:** §5.4 "Auto-save before apply" obligation is now the *user's* responsibility (Ctrl+S in FL Studio); the system prompt now says so explicitly.
+
+2. **`get_project_state` blew the 5s relay timeout** even on empty projects. Root cause was bridge enumeration of the full 127 mixer × 500 playlist × ~999 pattern slots — most default-named/uncolored. Fix: `_cmd_get_project_state` now skips entries with default names (`Insert N`, `Track N`, `Pattern N`) **and** zero color. Master (mixer index 0) always kept. Channels always returned (they exist iff the user added them). Empty-project response shrunk ~30× (1600 → ~5 entries).
+
+3. **Relay timeout was still tight** on cold-start (first message after WebSocket reconnect, while the bridge lazily opens its IPC pipe). Per user direction ("we fixed the problem by just incresing the time for timeout" in prior sessions), bumped `RELAY_REQUEST_TIMEOUT_SECONDS` from `5.0` → `30.0` in `apps/api/services/connection_manager.py`, exposed as a module-level constant, with the relay router's 504 message interpolating it. 14/14 API tests green.
+
+4. **`scaffold_project` plan drift (THE bug §11 didn't anticipate).** The legacy `organize_project` and `scaffold_project` tools accepted a `confirm: boolean`. On `confirm: false` they ran Gemini → returned a preview. On `confirm: true` they re-ran Gemini from scratch → applied a *fresh* plan. The plan the user approved was *not* the plan that got applied. This surfaced as `Cannot read properties of undefined (reading 'length')` because the second-run Gemini output happened to take a code path where `applyResult.data.errors` was undefined.
+
+   **Fix (final shape):** Both tools are now pure plan generators. They always return `{ status: "ready_to_apply", preview, plan }`, where `plan` is shaped exactly like `apply_organization_plan`'s input. The AI shows the preview, gets confirmation, then calls `apply_organization_plan` with the **exact** `plan` field (system prompt instructs: "pass it through verbatim, do not regenerate"). One generation, one apply, no drift. The `confirm` parameter is gone from both tools' schemas.
+
+   This is a stronger fix than the defensive `readApplyResult` helper that was the first attempt — by removing the second AI call entirely, both the drift bug *and* the brittle response-shape coupling disappear.
+
+**Spec items NOT yet verified on hardware** (deferred to a future smoke session — non-blocking for the bulk-apply infrastructure itself, all of which was unit-tested):
+
+- **§5.3 saveUndo grouping** (single Ctrl+Z reverts a 50-item batch) — needs a hand-built 50+ channel project. The `op_count` + `undo({count})` fallback path is shipped and unit-tested; this is verifying the happy-path optimization.
+- **§4 find-by-name disambiguation** (multi-match prompt) — needs deliberate name collisions (e.g. "Kick" + "Kick Layer").
+- **§5.5 PLAN_TOO_LARGE guard** (>2000-item plan triggers chunking) — needs a project larger than the typical workflow.
+
+These three are pure verification gates — the implementation is in place. They should be re-checked the next time someone has a real 50+ channel project loaded.
+
+**Open follow-ups filed:**
+
+- Delete orphaned `apps/web/src/app/api/ai/organize/route.ts` — dead since Task 15 refactor; zero callers; contains the same defensive-access vulnerability that bit `tools/organize.ts`.

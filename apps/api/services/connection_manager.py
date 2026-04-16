@@ -12,6 +12,17 @@ from services.redis_client import online_key, relay_channel, ONLINE_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
+# How long to wait for the plugin to respond to a relayed action.
+#
+# The previous 5s value was too tight for `get_project_state` on the very
+# first request after a WebSocket reconnect: the bridge still has to lazily
+# establish its IPC pipe to FL, and FL has to enumerate channels/mixer/
+# playlist/patterns in-process. On slower machines that easily overran 5s
+# even after we trimmed the response payload (handlers_organize.py filters
+# default-named slots). 30s is generous enough to cover that worst case
+# without leaving a truly broken plugin hanging the user indefinitely.
+RELAY_REQUEST_TIMEOUT_SECONDS = 30.0
+
 
 class ConnectionManager:
     """Manages WebSocket connections with Redis-backed registry.
@@ -62,10 +73,11 @@ class ConnectionManager:
         """Send an action to the plugin and await the response.
 
         Creates an asyncio.Future keyed by the message ID, sends the message
-        via the user's WebSocket, and waits up to 5 seconds for the response.
+        via the user's WebSocket, and waits up to RELAY_REQUEST_TIMEOUT_SECONDS
+        for the response.
 
         Raises:
-            TimeoutError: If no response within 5 seconds.
+            TimeoutError: If no response within RELAY_REQUEST_TIMEOUT_SECONDS.
             ConnectionError: If the user is not connected locally.
         """
         ws = self.local.get(user_id)
@@ -81,7 +93,9 @@ class ConnectionManager:
                 future: asyncio.Future[dict[str, Any]] = loop.create_future()
                 self.pending[message["id"]] = future
                 try:
-                    return await asyncio.wait_for(future, timeout=5.0)
+                    return await asyncio.wait_for(
+                        future, timeout=RELAY_REQUEST_TIMEOUT_SECONDS
+                    )
                 except asyncio.TimeoutError:
                     self.pending.pop(message["id"], None)
                     raise TimeoutError("RELAY_TIMEOUT")
@@ -94,7 +108,9 @@ class ConnectionManager:
         await ws.send_json(message)
 
         try:
-            result = await asyncio.wait_for(future, timeout=5.0)
+            result = await asyncio.wait_for(
+                future, timeout=RELAY_REQUEST_TIMEOUT_SECONDS
+            )
             return result
         except asyncio.TimeoutError:
             self.pending.pop(message["id"], None)

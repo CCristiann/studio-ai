@@ -33,7 +33,6 @@ describe("composeTools", () => {
       "rename_mixer_track",
       "rename_pattern",
       "rename_playlist_track",
-      "save_project",
       "scaffold_project",
       "set_bpm",
       "set_channel_color",

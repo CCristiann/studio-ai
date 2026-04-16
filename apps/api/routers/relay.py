@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 
 from config import get_settings
-from services.connection_manager import ConnectionManager
+from services.connection_manager import ConnectionManager, RELAY_REQUEST_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -75,7 +75,13 @@ async def relay_action(
     except TimeoutError:
         raise HTTPException(
             status_code=504,
-            detail={"code": "RELAY_TIMEOUT", "message": "Plugin did not respond within 5 seconds"},
+            detail={
+                "code": "RELAY_TIMEOUT",
+                "message": (
+                    "Plugin did not respond within "
+                    f"{int(RELAY_REQUEST_TIMEOUT_SECONDS)} seconds"
+                ),
+            },
         )
     except ConnectionError as e:
         error_code = str(e)
