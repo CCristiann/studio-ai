@@ -16,6 +16,7 @@ NC='\033[0m'
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_SRC="$ROOT_DIR/bridge/fl_studio/device_studio_ai.py"
 HANDLERS_SRC="$ROOT_DIR/bridge/fl_studio/handlers_organize.py"
+BULK_SRC="$ROOT_DIR/bridge/fl_studio/handlers_bulk.py"
 TRANSPORT_SRC="$ROOT_DIR/bridge/fl_studio/ipc_transport.py"
 PROTOCOL_SRC="$ROOT_DIR/bridge/fl_studio/_protocol.py"
 
@@ -50,6 +51,10 @@ if [ ! -f "$HANDLERS_SRC" ]; then
     echo -e "${RED}Handlers script not found: $HANDLERS_SRC${NC}"
     exit 1
 fi
+if [ ! -f "$BULK_SRC" ]; then
+    echo -e "${RED}Bulk handlers script not found: $BULK_SRC${NC}"
+    exit 1
+fi
 if [ ! -f "$TRANSPORT_SRC" ]; then
     echo -e "${RED}Transport module not found: $TRANSPORT_SRC${NC}"
     exit 1
@@ -64,6 +69,7 @@ mkdir -p "$DEST_DIR"
 # Copy the scripts
 cp "$SCRIPT_SRC" "$DEST_FILE"
 cp "$HANDLERS_SRC" "$DEST_DIR/handlers_organize.py"
+cp "$BULK_SRC" "$DEST_DIR/handlers_bulk.py"
 cp "$TRANSPORT_SRC" "$DEST_DIR/ipc_transport.py"
 cp "$PROTOCOL_SRC" "$DEST_DIR/_protocol.py"
 

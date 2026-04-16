@@ -11,12 +11,14 @@ $ErrorActionPreference = "Stop"
 $RootDir      = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ScriptSrc    = Join-Path $RootDir "bridge\fl_studio\device_studio_ai.py"
 $HandlersSrc  = Join-Path $RootDir "bridge\fl_studio\handlers_organize.py"
+$BulkSrc      = Join-Path $RootDir "bridge\fl_studio\handlers_bulk.py"
 $TransportSrc = Join-Path $RootDir "bridge\fl_studio\ipc_transport.py"
+$ProtocolSrc  = Join-Path $RootDir "bridge\fl_studio\_protocol.py"
 
 $FlHardwareDir = Join-Path $env:USERPROFILE "Documents\Image-Line\FL Studio\Settings\Hardware"
 $DestDir       = Join-Path $FlHardwareDir "Studio AI"
 
-foreach ($src in @($ScriptSrc, $HandlersSrc, $TransportSrc)) {
+foreach ($src in @($ScriptSrc, $HandlersSrc, $BulkSrc, $TransportSrc, $ProtocolSrc)) {
     if (-not (Test-Path $src)) {
         Write-Host "Source not found: $src" -ForegroundColor Red
         exit 1
@@ -25,14 +27,18 @@ foreach ($src in @($ScriptSrc, $HandlersSrc, $TransportSrc)) {
 
 New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 
-Copy-Item $ScriptSrc    (Join-Path $DestDir "device_studio_ai.py") -Force
+Copy-Item $ScriptSrc    (Join-Path $DestDir "device_studio_ai.py")  -Force
 Copy-Item $HandlersSrc  (Join-Path $DestDir "handlers_organize.py") -Force
-Copy-Item $TransportSrc (Join-Path $DestDir "ipc_transport.py")    -Force
+Copy-Item $BulkSrc      (Join-Path $DestDir "handlers_bulk.py")     -Force
+Copy-Item $TransportSrc (Join-Path $DestDir "ipc_transport.py")     -Force
+Copy-Item $ProtocolSrc  (Join-Path $DestDir "_protocol.py")         -Force
 
 Write-Host "FL Studio MIDI scripts installed to:" -ForegroundColor Green
 Write-Host "  $(Join-Path $DestDir 'device_studio_ai.py')"
 Write-Host "  $(Join-Path $DestDir 'handlers_organize.py')"
+Write-Host "  $(Join-Path $DestDir 'handlers_bulk.py')"
 Write-Host "  $(Join-Path $DestDir 'ipc_transport.py')"
+Write-Host "  $(Join-Path $DestDir '_protocol.py')"
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "  1. Open FL Studio"

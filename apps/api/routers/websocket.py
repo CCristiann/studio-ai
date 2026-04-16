@@ -9,6 +9,7 @@ import httpx
 from config import get_settings
 from middleware.jwt_validation import validate_jwt, JWTValidationError
 from services.connection_manager import ConnectionManager
+from services.jti_revocation import is_jti_revoked, RevocationLookupError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,6 +21,41 @@ WS_CLOSE_SUBSCRIPTION_EXPIRED = 4003
 # Bound the first-message-auth fallback to limit unauthenticated socket
 # lifetime (DoS surface). The handshake-auth path skips this entirely.
 LEGACY_AUTH_TIMEOUT_SECONDS = 5.0
+
+# How often to recheck jti revocation while the socket is open (audit H3).
+# Kept at 5 min to balance detection latency against DB pressure — combined
+# with the 4-min Redis cache, the expected Supabase RPS per user is <0.5/hr.
+JTI_RECHECK_INTERVAL_SECONDS = 300.0
+
+
+async def _jti_recheck_loop(
+    ws: WebSocket,
+    jti: str,
+    redis,
+    settings,
+    interval: float = JTI_RECHECK_INTERVAL_SECONDS,
+) -> None:
+    """Background task: periodically recheck jti revocation; close on revoke.
+
+    On RevocationLookupError we log and continue — a transient Supabase
+    outage shouldn't boot active producers mid-session. Worst case: a
+    revocation takes one extra cycle to propagate once Supabase recovers.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            revoked = await is_jti_revoked(jti, redis, settings)
+        except RevocationLookupError as e:
+            logger.warning(
+                "jti recheck lookup failed for %s: %s — keeping socket alive",
+                jti,
+                e,
+            )
+            continue
+        if revoked:
+            logger.info("jti %s revoked — closing WSS", jti)
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Token revoked")
+            return
 
 
 async def check_subscription(user_id: str) -> bool:
@@ -58,6 +94,28 @@ def _extract_bearer_token(ws: WebSocket) -> str | None:
     return None
 
 
+async def _check_jti_or_close(
+    ws: WebSocket, jti: str, redis, settings
+) -> bool:
+    """Handshake-time revocation check. Returns True if OK to proceed.
+
+    On revoked or lookup error, closes the socket and returns False.
+    Pre-accept close gives the client HTTP 403; post-accept close uses
+    WS_CLOSE_AUTH_FAILED. The caller decides which state it's in.
+    """
+    try:
+        revoked = await is_jti_revoked(jti, redis, settings)
+    except RevocationLookupError as e:
+        logger.warning("Handshake jti lookup failed for %s: %s", jti, e)
+        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Revocation check failed")
+        return False
+    if revoked:
+        logger.info("Handshake rejected revoked jti %s", jti)
+        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="Token revoked")
+        return False
+    return True
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """Plugin WebSocket connection endpoint.
@@ -71,11 +129,15 @@ async def websocket_endpoint(ws: WebSocket):
        hold resources indefinitely. Drop after the plugin handshake-auth
        release reaches all installed users.
 
-    After auth: subscription check → register in ConnectionManager → receive loop.
+    After auth: jti revocation check (plugin tokens only) → subscription check
+    → register in ConnectionManager → start recheck loop → receive loop.
     """
     handshake_token = _extract_bearer_token(ws)
+    manager: ConnectionManager = ws.app.state.manager
+    settings = get_settings()
 
     user_id: str | None = None
+    jti: str | None = None
 
     if handshake_token is not None:
         # Handshake-auth path: validate before accept so bad tokens never
@@ -83,10 +145,18 @@ async def websocket_endpoint(ws: WebSocket):
         try:
             payload = validate_jwt(handshake_token)
             user_id = payload["sub"]
+            jti = payload.get("jti")
         except JWTValidationError as e:
             logger.warning("Handshake auth failed: %s", e.message)
             await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=e.message)
             return
+
+        # jti revocation check (audit H3). Only plugin tokens carry a jti.
+        # Pre-accept close → HTTP 403.
+        if jti is not None:
+            if not await _check_jti_or_close(ws, jti, manager.redis, settings):
+                return
+
         await ws.accept()
     else:
         # Legacy first-message-auth path. Strict 5s timeout bounds
@@ -112,12 +182,16 @@ async def websocket_endpoint(ws: WebSocket):
         try:
             payload = validate_jwt(token)
             user_id = payload["sub"]
+            jti = payload.get("jti")
         except JWTValidationError as e:
             logger.warning("First-message auth failed: %s", e.message)
             await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=e.message)
             return
 
-    manager: ConnectionManager = ws.app.state.manager
+        # Post-accept revocation check.
+        if jti is not None:
+            if not await _check_jti_or_close(ws, jti, manager.redis, settings):
+                return
 
     # Step 3: Check subscription
     has_subscription = await check_subscription(user_id)
@@ -133,7 +207,14 @@ async def websocket_endpoint(ws: WebSocket):
     await manager.redis.set(f"plugin:online:{user_id}", "1", ex=90)
     logger.info("User %s authenticated and registered", user_id)
 
-    # Step 5: Receive loop
+    # Step 5: Periodic jti recheck task (plugin tokens only).
+    recheck_task: asyncio.Task | None = None
+    if jti is not None:
+        recheck_task = asyncio.create_task(
+            _jti_recheck_loop(ws, jti, manager.redis, settings)
+        )
+
+    # Step 6: Receive loop
     try:
         while True:
             raw = await ws.receive_text()
@@ -168,4 +249,6 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception as e:
         logger.error("WebSocket error for user %s: %s", user_id, e)
     finally:
+        if recheck_task is not None and not recheck_task.done():
+            recheck_task.cancel()
         await manager.disconnect(user_id)
