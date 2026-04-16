@@ -62,7 +62,24 @@ if not _IS_WINDOWS:
                 return b""
 
         def write_response(self, data):
-            os.write(_RESP_FD, data)
+            # os.write on a blocking pipe MAY return fewer bytes than
+            # requested (EINTR, kernel-buffer backpressure, PIPE_BUF edge
+            # cases for writes > PIPE_BUF bytes). The old one-shot version
+            # silently dropped the tail, leaving the plugin blocked waiting
+            # for the newline delimiter — the exact "handler completes in
+            # 3 ms but plugin times out at 20 s" symptom. Retry until done.
+            mv = memoryview(data)
+            total = 0
+            while total < len(data):
+                n = os.write(_RESP_FD, mv[total:])
+                if n <= 0:
+                    raise IOError(
+                        "os.write returned {} after {}/{} bytes".format(
+                            n, total, len(data)
+                        )
+                    )
+                total += n
+            return total
 
     transport = _UnixTransport()
 

@@ -61,7 +61,11 @@ _pipe_buf = b""  # accumulate partial line-delimited reads from fd 20
 # ──────────────────── FL Studio callbacks ────────────────────
 
 def OnInit():
-    _log("Studio AI bridge ready (MIDI SysEx transport)")
+    # Label reflects reality: macOS uses the pipe backend, Windows uses
+    # MIDI SysEx. The old hardcoded "MIDI SysEx transport" string made it
+    # impossible to tell at a glance which path was active when debugging.
+    transport_name = "pipe" if _USE_PIPE else "MIDI SysEx"
+    _log("Studio AI bridge ready ({} transport)".format(transport_name))
 
 
 def OnDeInit():
@@ -169,12 +173,23 @@ def _handle_pipe_command(json_str):
 
 
 def _send_pipe_response(cmd_id, success, data=None):
-    """Write a newline-delimited JSON response to the pipe (fd 21)."""
+    """Write a newline-delimited JSON response to the pipe (fd 21).
+
+    Logs payload size BEFORE the write and "pipe write OK" AFTER, so
+    Script Output gives us a breadcrumb trail for diagnosing plugin
+    timeouts. Without these two lines, a timeout with no log is
+    indistinguishable from "the handler never reached _send_pipe_response"
+    vs. "the write succeeded but bytes never reached the plugin".
+    """
     payload = json.dumps({"id": cmd_id, "success": success, "data": data}) + "\n"
+    raw = payload.encode("utf-8")
+    _log("pipe response: id={} success={} size={}B".format(cmd_id, success, len(raw)))
     try:
-        _transport.write_response(payload.encode("utf-8"))
+        _transport.write_response(raw)
     except Exception as e:
         _log("pipe write failed: " + str(e))
+        return
+    _log("pipe write OK: {}B".format(len(raw)))
 
 
 def _send_response(cmd_id, success, data=None):

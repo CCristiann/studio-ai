@@ -118,6 +118,13 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
     let write_fd = PLUGIN_WRITE_FD.load(Ordering::Acquire);
     let read_fd = PLUGIN_READ_FD.load(Ordering::Acquire);
 
+    // Best-effort cmd_id extraction for diagnostic logging. Not load-bearing;
+    // if the caller forgot an id we still relay, we just log "?".
+    let cmd_id: String = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "?".to_string());
+
     // Write command + newline to pipe
     let data = format!("{}\n", payload);
     let bytes = data.as_bytes();
@@ -127,19 +134,45 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
     if written < 0 {
         return Err(io::Error::last_os_error());
     }
+    log::info!(
+        "pipe: sent cmd id={} bytes={} (wrote={})",
+        cmd_id,
+        bytes.len(),
+        written
+    );
 
     // Poll for response with timeout (see PIPE_RESPONSE_TIMEOUT), 10ms intervals
     let deadline = std::time::Instant::now() + PIPE_RESPONSE_TIMEOUT;
     let mut buffer = Vec::with_capacity(65536);
     let mut read_buf = [0u8; 65536];
+    let mut reads_observed: u32 = 0;
 
     loop {
         if std::time::Instant::now() >= deadline {
+            // Include accumulated buffer size in the error — a non-zero
+            // figure here is a smoking gun for a bridge-side partial write
+            // or a missing newline terminator.
+            let preview: String = String::from_utf8_lossy(
+                &buffer[..buffer.len().min(120)],
+            )
+            .to_string();
+            log::warn!(
+                "pipe: timeout id={} buffered={}B reads={} preview={:?}",
+                cmd_id,
+                buffer.len(),
+                reads_observed,
+                preview,
+            );
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
-                    "FL script response timeout ({} s) — the handler is likely doing a heavy enumeration (e.g. get_project_state on a 500-track playlist). Check FL Studio's Script Output for timing logs.",
-                    PIPE_RESPONSE_TIMEOUT.as_secs()
+                    "FL script response timeout ({} s), id={}, buffered={}B (no '\\n' seen). \
+                     A non-zero buffered count means the bridge wrote a partial response or \
+                     forgot the newline terminator. Check FL Studio's Script Output for \
+                     'pipe response'/'pipe write OK' lines.",
+                    PIPE_RESPONSE_TIMEOUT.as_secs(),
+                    cmd_id,
+                    buffer.len(),
                 ),
             ));
         }
@@ -150,9 +183,16 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
 
         if n > 0 {
             buffer.extend_from_slice(&read_buf[..n as usize]);
+            reads_observed += 1;
             // Check for complete response (newline-delimited)
             if let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                 let response = String::from_utf8_lossy(&buffer[..pos]).to_string();
+                log::info!(
+                    "pipe: response recv id={} bytes={} reads={}",
+                    cmd_id,
+                    pos,
+                    reads_observed
+                );
                 return Ok(response);
             }
         } else if n < 0 {
@@ -165,7 +205,15 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             return Err(err);
         } else {
             // n == 0: pipe closed
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "FL script pipe closed"));
+            log::warn!(
+                "pipe: FD closed while waiting id={} buffered={}B",
+                cmd_id,
+                buffer.len()
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("FL script pipe closed (buffered {}B, no newline)", buffer.len()),
+            ));
         }
     }
 }
