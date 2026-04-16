@@ -1,21 +1,53 @@
-import { SignJWT, jwtVerify } from "jose";
+import {
+  SignJWT,
+  jwtVerify,
+  importPKCS8,
+  importSPKI,
+  decodeProtectedHeader,
+  type CryptoKey,
+} from "jose";
 import { createSupabaseServerClient } from "./supabase";
 
 const ISSUER = "studio-ai";
 const AUDIENCE = "studio-ai-plugin";
 const TOKEN_TTL_HOURS = 24;
+const SIGN_ALG = "RS256";
+const SIGN_KID = "v1";
 
-function getSecret() {
+let _privateKey: CryptoKey | null = null;
+let _publicKey: CryptoKey | null = null;
+
+function decodePem(value: string): string {
+  // Hosts that don't accept multi-line env values (Vercel/Railway when set
+  // through the CLI) round-trip newlines as the literal two-character "\n".
+  return value.includes("\\n") ? value.replace(/\\n/g, "\n") : value;
+}
+
+async function getPrivateKey(): Promise<CryptoKey> {
+  if (_privateKey) return _privateKey;
+  const pem = process.env.PLUGIN_JWT_PRIVATE_KEY;
+  if (!pem) throw new Error("Missing PLUGIN_JWT_PRIVATE_KEY");
+  _privateKey = await importPKCS8(decodePem(pem), SIGN_ALG);
+  return _privateKey;
+}
+
+async function getPublicKey(): Promise<CryptoKey> {
+  if (_publicKey) return _publicKey;
+  const pem = process.env.PLUGIN_JWT_PUBLIC_KEY;
+  if (!pem) throw new Error("Missing PLUGIN_JWT_PUBLIC_KEY");
+  _publicKey = await importSPKI(decodePem(pem), SIGN_ALG);
+  return _publicKey;
+}
+
+function getLegacyHs256Secret(): Uint8Array | null {
   const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
-  if (!secret) throw new Error("Missing NEXTAUTH_SECRET");
-  return new TextEncoder().encode(secret);
+  return secret ? new TextEncoder().encode(secret) : null;
 }
 
 export async function signPluginToken(userId: string): Promise<string> {
   const jti = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + TOKEN_TTL_HOURS * 60 * 60 * 1000);
 
-  // Store token record for revocation support
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("plugin_tokens").insert({
     jti,
@@ -27,19 +59,33 @@ export async function signPluginToken(userId: string): Promise<string> {
   }
 
   return new SignJWT({ userId, jti })
-    .setProtectedHeader({ alg: "HS256" })
+    .setProtectedHeader({ alg: SIGN_ALG, kid: SIGN_KID })
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
     .setIssuedAt()
     .setExpirationTime(`${TOKEN_TTL_HOURS}h`)
-    .sign(getSecret());
+    .sign(await getPrivateKey());
 }
 
 export async function verifyPluginToken(
   token: string
 ): Promise<{ userId: string } | null> {
   try {
-    const { payload } = await jwtVerify(token, getSecret(), {
+    const header = decodeProtectedHeader(token);
+    let key: CryptoKey | Uint8Array;
+    if (header.alg === "RS256") {
+      key = await getPublicKey();
+    } else if (header.alg === "HS256") {
+      // Legacy tokens from before the RS256 cutover. Drop this branch once
+      // all HS256 tokens have expired (≤ TOKEN_TTL_HOURS after cutover).
+      const secret = getLegacyHs256Secret();
+      if (!secret) return null;
+      key = secret;
+    } else {
+      return null;
+    }
+
+    const { payload } = await jwtVerify(token, key, {
       issuer: ISSUER,
       audience: AUDIENCE,
     });
@@ -47,7 +93,6 @@ export async function verifyPluginToken(
       return null;
     }
 
-    // Check if token has been revoked
     const supabase = createSupabaseServerClient();
     const { data } = await supabase
       .from("plugin_tokens")
@@ -55,7 +100,6 @@ export async function verifyPluginToken(
       .eq("jti", payload.jti)
       .single();
 
-    // If no record found or revoked, reject
     if (!data || data.revoked) {
       return null;
     }

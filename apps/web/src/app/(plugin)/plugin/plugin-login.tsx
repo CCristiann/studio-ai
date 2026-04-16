@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useInitiateDeviceFlow } from '@/hooks/mutations/use-device-auth-mutations'
 import { authQueries } from '@/lib/query/queries/auth'
+import Dither from '@/components/Dither'
 
 export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
   const [sessionId, setSessionId] = useState('')
@@ -21,31 +22,37 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
     ...authQueries.deviceToken(sessionId, deviceCode, expiresAt),
   })
 
-  // When polling returns a complete token, pass it up
+  // Single expiry path: poll response wins if it arrives, otherwise the client
+  // deadline acts as a backstop (the query disables at expiresAt, so without it
+  // a session that quietly times out would leave the UI stuck on "Waiting...").
   useEffect(() => {
-    if (pollData?.status === 'complete' && pollData.token) {
-      onToken(pollData.token)
-    } else if (pollData?.status === 'expired') {
+    if (!deviceCode) return
+
+    const reset = () => {
       setError('Session expired. Please try again.')
       setSessionId('')
       setDeviceCode('')
       setUserCode('')
     }
-  }, [pollData, onToken])
 
-  // Handle expiry based on deadline
-  useEffect(() => {
+    if (pollData?.status === 'complete' && pollData.token) {
+      onToken(pollData.token)
+      return
+    }
+    if (pollData?.status === 'expired') {
+      reset()
+      return
+    }
+
     if (!expiresAt) return
-    const timeout = setTimeout(() => {
-      if (Date.now() >= expiresAt && deviceCode) {
-        setError('Authorization expired. Please try again.')
-        setSessionId('')
-        setDeviceCode('')
-        setUserCode('')
-      }
-    }, expiresAt - Date.now())
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      reset()
+      return
+    }
+    const timeout = setTimeout(reset, remaining)
     return () => clearTimeout(timeout)
-  }, [expiresAt, deviceCode])
+  }, [pollData, deviceCode, expiresAt, onToken])
 
   const startAuth = async () => {
     setError('')
@@ -74,7 +81,20 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-background">
-      <Card className="w-full max-w-sm p-6 space-y-4">
+      <div className="w-full h-screen fixed top-0 left-0">
+        <Dither
+          waveColor={[0.8823529411764706, 0.8823529411764706, 0.8823529411764706]}
+          disableAnimation={false}
+          enableMouseInteraction={false}
+          mouseRadius={1}
+          colorNum={7}
+          pixelSize={2}
+          waveAmplitude={0.25}
+          waveFrequency={3.5}
+          waveSpeed={0.04}
+        />
+      </div>
+      <Card className="w-full max-w-sm fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-card/70 backdrop-blur-xl p-12 rounded-3xl">
         <div className="text-center space-y-1">
           <h1 className="text-xl font-semibold">Studio AI</h1>
           <p className="text-sm text-muted-foreground">
@@ -88,7 +108,7 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
             className="w-full"
             disabled={initiate.isPending}
           >
-            {initiate.isPending ? 'Starting...' : 'Sign in with Browser'}
+            {!initiate.isPending && 'Sign in with Browser'}
           </Button>
         ) : (
           <div className="space-y-3">

@@ -11,10 +11,7 @@ export default function PluginPage() {
   const { token, ready, setToken, clearToken } = usePluginToken()
 
   // Periodic server-side validation (checks revocation)
-  const { isError } = useQuery({
-    ...authQueries.validate(token ?? ''),
-    enabled: !!token,
-  })
+  const { isError } = useQuery(authQueries.validate(token))
 
   // If validation fails, clear the token
   useEffect(() => {

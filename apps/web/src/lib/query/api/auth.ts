@@ -12,7 +12,7 @@ export interface DeviceTokenResponse {
   token?: string
 }
 
-export async function validateToken(token: string): Promise<{ valid: boolean }> {
+export async function validateToken(token: string): Promise<{ valid: true }> {
   const res = await fetch('/api/auth/plugin/validate', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -21,7 +21,13 @@ export async function validateToken(token: string): Promise<{ valid: boolean }> 
     const body = await res.text()
     throw new ApiError(res.status, body)
   }
-  return res.json()
+  const data = await res.json()
+  // Soft revocation: server may return 200 with { valid: false }.
+  // Normalize to the same 401 path so the global handler runs.
+  if (!data.valid) {
+    throw new ApiError(401, JSON.stringify(data))
+  }
+  return data
 }
 
 export async function initiateDeviceFlow(): Promise<DeviceFlowSession> {

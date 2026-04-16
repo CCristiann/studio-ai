@@ -1,11 +1,10 @@
-import { queryOptions } from '@tanstack/react-query'
+import { queryOptions, skipToken } from '@tanstack/react-query'
 import { fetchPresets } from '../api/presets'
 
 export const presetQueries = {
-  all: (token: string) =>
+  all: (token: string | null) =>
     queryOptions({
       queryKey: ['presets', 'all'] as const,
-      queryFn: () => fetchPresets(token),
-      enabled: !!token,
+      queryFn: token ? () => fetchPresets(token) : skipToken,
     }),
 }

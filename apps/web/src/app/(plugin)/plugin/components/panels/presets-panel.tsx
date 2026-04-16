@@ -23,7 +23,7 @@ export function PresetsPanel({
   onSendPrompt: (prompt: string) => void
 }) {
   const { token } = usePluginToken()
-  const { data: presets, isLoading } = useQuery(presetQueries.all(token ?? ''))
+  const { data: presets, isLoading } = useQuery(presetQueries.all(token))
   const createPreset = useCreatePreset()
 
   const [showCreate, setShowCreate] = useState(false)
