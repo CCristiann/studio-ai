@@ -122,3 +122,76 @@ def test_relay_error_response(client, manager):
         headers={"X-API-Key": TEST_API_KEY},
     )
     assert response.status_code in (200, 504)
+
+
+def test_relay_handler_exception_surfaces_error_message(client, manager):
+    """Regression: when an FL Studio handler raises, the bridge sends the
+    exception message inside payload.data.error with success=False, but
+    payload.type stays "response" (the plugin only uses type="error" for IPC
+    failures). The relay used to drop payload.data.error on the floor, so
+    the AI tool only saw `success:false` with no error text — the AI then
+    hallucinated advice like "make sure FL Studio is running". The relay
+    must promote data.error into the top-level error field so every tool
+    can surface it to the model.
+    """
+    mock_ws = AsyncMock()
+    manager.local["user-handler-crash"] = mock_ws
+
+    async def simulate_handler_exception(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        for msg_id, fut in list(manager.pending.items()):
+            if not fut.done():
+                fut.set_result({
+                    "id": msg_id,
+                    "type": "response",
+                    "payload": {
+                        "success": False,
+                        "data": {"error": "module 'mixer' has no attribute 'getCurrentTempo'"},
+                    },
+                })
+
+    mock_ws.send_json.side_effect = lambda msg: asyncio.ensure_future(
+        simulate_handler_exception()
+    )
+
+    response = client.post(
+        "/relay/user-handler-crash",
+        json={"action": "get_project_state", "params": {}},
+        headers={"X-API-Key": TEST_API_KEY},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"] == "module 'mixer' has no attribute 'getCurrentTempo'"
+
+
+def test_relay_handler_failure_without_error_field_still_marks_failed(client, manager):
+    """Defensive path: some legacy handlers may return success=False without
+    any error text (or with data=null). Relay must still mark success=False;
+    the error field can be None but should not crash the response model.
+    """
+    mock_ws = AsyncMock()
+    manager.local["user-silent-fail"] = mock_ws
+
+    async def simulate_silent_fail(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        for msg_id, fut in list(manager.pending.items()):
+            if not fut.done():
+                fut.set_result({
+                    "id": msg_id,
+                    "type": "response",
+                    "payload": {"success": False, "data": None},
+                })
+
+    mock_ws.send_json.side_effect = lambda msg: asyncio.ensure_future(
+        simulate_silent_fail()
+    )
+
+    response = client.post(
+        "/relay/user-silent-fail",
+        json={"action": "set_bpm", "params": {"bpm": 120}},
+        headers={"X-API-Key": TEST_API_KEY},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False

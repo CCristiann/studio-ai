@@ -92,7 +92,7 @@ export function organizeTools(userId: string) {
         try {
           const stateResult = await relay(userId, "get_project_state", {});
           if (!stateResult.success) {
-            return { success: false, error: "Could not read project state" };
+            return { success: false, error: stateResult.error ?? "Could not read project state" };
           }
           const projectState = stateResult.data as EnhancedProjectState | undefined;
           if (!projectState?.channels) {

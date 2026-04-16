@@ -108,8 +108,25 @@ async def relay_action(
             code=error_code,
         )
 
+    success = result_payload.get("success", True)
+    data = result_payload.get("data")
+
+    # When a bridge handler raises, the FL script wraps the exception as
+    # {"success": false, "data": {"error": "..."}} and the Rust plugin keeps
+    # type="response" (it only uses type="error" for IPC failures). Without
+    # promoting data.error up here, every web tool sees `error: undefined`
+    # and has no way to tell the model what actually went wrong — the AI
+    # ends up hallucinating generic advice like "make sure FL Studio is
+    # running". Pull the error string out so tools can surface it verbatim.
+    error: str | None = None
+    if not success and isinstance(data, dict):
+        raw = data.get("error") or data.get("message")
+        if raw is not None:
+            error = str(raw)
+
     return RelayResponse(
         id=message_id,
-        success=result_payload.get("success", True),
-        data=result_payload.get("data"),
+        success=success,
+        data=data,
+        error=error,
     )
