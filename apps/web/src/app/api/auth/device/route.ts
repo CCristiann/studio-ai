@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   // Rate limit: max 5 device sessions per IP per minute
   const ip = getClientIp(req);
-  const { success } = rateLimit(`device-create:${ip}`, {
+  const { success } = await rateLimit(`device-create:${ip}`, {
     limit: 5,
     windowMs: 60_000,
   });

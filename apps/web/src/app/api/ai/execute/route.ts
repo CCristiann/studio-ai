@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   }
 
   // Rate limit: max 20 AI requests per user per minute
-  const { success } = rateLimit(`ai:${userId}`, {
+  const { success } = await rateLimit(`ai:${userId}`, {
     limit: 20,
     windowMs: 60_000,
   });

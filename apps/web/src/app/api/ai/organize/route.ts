@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { success } = rateLimit(`organize:${userId}`, {
+  const { success } = await rateLimit(`organize:${userId}`, {
     limit: 10,
     windowMs: 60_000,
   });

@@ -14,7 +14,7 @@ export async function verifyUserCode(
   }
 
   // Rate limit: max 10 code attempts per user per minute
-  const { success: allowed } = rateLimit(`link-code:${session.userId}`, {
+  const { success: allowed } = await rateLimit(`link-code:${session.userId}`, {
     limit: 10,
     windowMs: 60_000,
   });

@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   // Rate limit: max 30 polls per IP per minute (1 every 2s)
   const ip = getClientIp(req);
-  const { success } = rateLimit(`device-token:${ip}`, {
+  const { success } = await rateLimit(`device-token:${ip}`, {
     limit: 30,
     windowMs: 60_000,
   });
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
   const codeHash = hashDeviceCode(device_code);
   if (codeHash !== session.device_code_hash) {
     // Rate limit invalid code attempts per session (max 5)
-    const { success: codeOk } = rateLimit(`device-code:${session_id}`, {
+    const { success: codeOk } = await rateLimit(`device-code:${session_id}`, {
       limit: 5,
       windowMs: 300_000,
     });
