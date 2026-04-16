@@ -1,4 +1,4 @@
-import { ApiError } from '../errors'
+import { authFetch } from './_http'
 
 export interface Preset {
   id: string
@@ -17,24 +17,8 @@ export interface CreatePresetInput {
 
 const BASE = '/api/plugin/presets'
 
-async function authFetch(url: string, token: string, init?: RequestInit) {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...init?.headers,
-    },
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new ApiError(res.status, body)
-  }
-  return res.json()
-}
-
 export async function fetchPresets(token: string): Promise<Preset[]> {
-  const data = await authFetch(BASE, token)
+  const data = (await authFetch(BASE, token)) as { presets: Preset[] }
   return data.presets
 }
 
@@ -42,10 +26,10 @@ export async function createPreset(
   token: string,
   input: CreatePresetInput,
 ): Promise<Preset> {
-  const data = await authFetch(BASE, token, {
+  const data = (await authFetch(BASE, token, {
     method: 'POST',
     body: JSON.stringify(input),
-  })
+  })) as { preset: Preset }
   return data.preset
 }
 
@@ -54,10 +38,10 @@ export async function updatePreset(
   id: string,
   input: Partial<CreatePresetInput>,
 ): Promise<Preset> {
-  const data = await authFetch(`${BASE}/${id}`, token, {
+  const data = (await authFetch(`${BASE}/${id}`, token, {
     method: 'PUT',
     body: JSON.stringify(input),
-  })
+  })) as { preset: Preset }
   return data.preset
 }
 
@@ -65,5 +49,7 @@ export async function deletePreset(
   token: string,
   id: string,
 ): Promise<{ success: boolean }> {
-  return authFetch(`${BASE}/${id}`, token, { method: 'DELETE' })
+  return (await authFetch(`${BASE}/${id}`, token, {
+    method: 'DELETE',
+  })) as { success: boolean }
 }
