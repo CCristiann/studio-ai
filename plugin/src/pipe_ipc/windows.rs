@@ -53,7 +53,16 @@ const PORT_CMD: &str = "Studio AI Cmd";
 /// FL Studio opens this as its MIDI OUTPUT device to send responses.
 /// Plugin opens this as MIDI INPUT to receive responses.
 const PORT_RESP: &str = "Studio AI Resp";
-const RELAY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Max time to wait for the FL script to write a response.
+///
+/// Was 5s — too tight. The enhanced `get_project_state` handler iterates
+/// 127 mixer tracks + 500 playlist tracks + N patterns + channels, each
+/// calling 2-7 getters in FL's Python API. That's ~2000 round-trips into
+/// FL's scripting runtime, which on slower machines routinely blows past
+/// 5s. The FastAPI relay upstream waits 30s, so 20s here leaves ample
+/// headroom without making genuine plugin hangs feel endless. Keep this
+/// synced with `unix.rs::PIPE_RESPONSE_TIMEOUT`.
+const RELAY_TIMEOUT: Duration = Duration::from_secs(20);
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static OUTPUT: Mutex<Option<MidiOutputConnection>> = Mutex::new(None);
@@ -191,7 +200,10 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
             let _ = pending().lock().map(|mut m| m.remove(&cmd_id));
             Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "FL script response timeout (5 s)",
+                format!(
+                    "FL script response timeout ({} s) — the handler is likely doing a heavy enumeration (e.g. get_project_state on a 500-track playlist). Check FL Studio's Script Output for timing logs.",
+                    RELAY_TIMEOUT.as_secs()
+                ),
             ))
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {

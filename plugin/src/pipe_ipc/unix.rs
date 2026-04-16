@@ -18,10 +18,22 @@
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 /// File descriptors that FL Studio's MIDI script reads/writes.
 const FL_READ_FD: i32 = 20;  // FL reads commands from this fd
 const FL_WRITE_FD: i32 = 21; // FL writes responses to this fd
+
+/// Max time to wait for the FL script to write a response.
+///
+/// Was 5s — too tight. The enhanced `get_project_state` handler iterates
+/// 127 mixer tracks + 500 playlist tracks + N patterns + channels, each
+/// calling 2-7 getters in FL's Python API. That's ~2000 round-trips into
+/// FL's scripting runtime, which on slower machines routinely blows past
+/// 5s. The FastAPI relay upstream waits 30s, so 20s here leaves ample
+/// headroom without making genuine plugin hangs feel endless. Keep this
+/// synced with `windows.rs`.
+const PIPE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Plugin-side file descriptors (the other ends of the pipes).
 /// Using AtomicI32 for safe cross-thread access.
@@ -116,14 +128,20 @@ pub fn relay_to_fl(payload: &str) -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
 
-    // Poll for response with timeout (5 seconds, 10ms intervals)
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // Poll for response with timeout (see PIPE_RESPONSE_TIMEOUT), 10ms intervals
+    let deadline = std::time::Instant::now() + PIPE_RESPONSE_TIMEOUT;
     let mut buffer = Vec::with_capacity(65536);
     let mut read_buf = [0u8; 65536];
 
     loop {
         if std::time::Instant::now() >= deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "FL script response timeout"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "FL script response timeout ({} s) — the handler is likely doing a heavy enumeration (e.g. get_project_state on a 500-track playlist). Check FL Studio's Script Output for timing logs.",
+                    PIPE_RESPONSE_TIMEOUT.as_secs()
+                ),
+            ));
         }
 
         let n = unsafe {

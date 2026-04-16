@@ -30,13 +30,18 @@ def _cmd_get_project_state(params):
 
     Why filter: FL allocates 127 mixer tracks + 500 playlist tracks + many
     pattern slots by default. Returning all of them on every call (a) blows
-    past the 5s relay timeout on slower machines, and (b) drowns the AI in
-    noise. For organize tasks the AI only cares about what the user has
-    actually named or colored. Default-named slots ("Insert N", "Track N",
-    "Pattern N") with a default color are skipped.
+    past the plugin's IPC timeout on slower machines (was 5s, now 20s), and
+    (b) drowns the AI in noise. For organize tasks the AI only cares about
+    what the user has actually named or colored. Default-named slots
+    ("Insert N", "Track N", "Pattern N") with a default color are skipped.
 
     Channels are always included because they exist iff the user added them.
+
+    Timing note: each section is timed and printed to the FL Script Output
+    window. If you see a timeout reported in the chat UI, check Script Output
+    for per-section timings to see where the handler is stuck.
     """
+    import time
     import general
     import mixer
     import channels
@@ -44,9 +49,11 @@ def _cmd_get_project_state(params):
     import playlist
     import transport
 
+    _t0 = time.time()
     bpm = float(mixer.getCurrentTempo()) / 1000.0
     project_name = general.getProjectTitle() or "Untitled"
     is_playing = transport.isPlaying()
+    _t_meta = time.time() - _t0
 
     def _is_default_mixer_name(name, idx):
         if not name:
@@ -62,6 +69,7 @@ def _cmd_get_project_state(params):
         return not name or name.startswith("Pattern ")
 
     # ── Channel Rack ──────────────────────────────────────────────────────────
+    _t_start = time.time()
     channel_list = []
     ch_count = channels.channelCount()
     for i in range(ch_count):
@@ -84,8 +92,10 @@ def _cmd_get_project_state(params):
         except Exception:
             # Skip channels that raise (e.g. out-of-range during enumeration)
             pass
+    _t_channels = time.time() - _t_start
 
     # ── Mixer tracks (filter default-named uncolored slots) ───────────────────
+    _t_start = time.time()
     mixer_list = []
     mx_count = mixer.trackCount()
     for i in range(mx_count):
@@ -108,8 +118,10 @@ def _cmd_get_project_state(params):
             })
         except Exception:
             pass
+    _t_mixer = time.time() - _t_start
 
     # ── Playlist tracks (1-indexed; filter defaults) ──────────────────────────
+    _t_start = time.time()
     playlist_list = []
     pl_count = playlist.trackCount()
     for i in range(1, pl_count + 1):
@@ -125,8 +137,10 @@ def _cmd_get_project_state(params):
             })
         except Exception:
             pass
+    _t_playlist = time.time() - _t_start
 
     # ── Patterns (1-indexed; filter defaults) ─────────────────────────────────
+    _t_start = time.time()
     pattern_list = []
     pat_count = patterns.patternCount()
     for i in range(1, pat_count + 1):
@@ -142,6 +156,27 @@ def _cmd_get_project_state(params):
             })
         except Exception:
             pass
+    _t_patterns = time.time() - _t_start
+
+    _t_total = time.time() - _t0
+    # Budget: plugin pipe IPC timeout is ~20s. Warn above 10s; scream above 18s.
+    _marker = ""
+    if _t_total > 18.0:
+        _marker = " !!! NEAR-TIMEOUT"
+    elif _t_total > 10.0:
+        _marker = " !! SLOW"
+    print(
+        "[Studio AI] get_project_state timing (s): "
+        "meta={:.3f} channels={:.3f} (n={}) mixer={:.3f} (n={}/{}) "
+        "playlist={:.3f} (n={}/{}) patterns={:.3f} (n={}/{}) total={:.3f}{}".format(
+            _t_meta,
+            _t_channels, len(channel_list),
+            _t_mixer, len(mixer_list), mx_count,
+            _t_playlist, len(playlist_list), pl_count,
+            _t_patterns, len(pattern_list), pat_count,
+            _t_total, _marker,
+        )
+    )
 
     return {
         "bpm": bpm,
