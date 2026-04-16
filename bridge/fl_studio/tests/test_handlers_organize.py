@@ -22,6 +22,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 from conftest import install_fl_mocks, uninstall_fl_mocks
 
 
+# Real FL Studio 21 (MIDI API v40) returns a signed 32-bit int for
+# getTrackColor/getPatternColor on untouched slots — NOT 0. The high byte is
+# typically set (theme default), so `value & 0xFFFFFF` yields a non-zero gray
+# (observed ~0x636C71 in the wild). -10261391 == (0xFF636C71 as int32). Tests
+# use this to reproduce the bug where `color == 0` never matches and 500
+# default playlist slots leak into the response, ballooning the IPC payload.
+FL_DEFAULT_COLOR_SIGNED = -10261391
+
+
 class GetProjectStateTests(unittest.TestCase):
     def setUp(self):
         self.mocks = install_fl_mocks()
@@ -93,6 +102,72 @@ class GetProjectStateTests(unittest.TestCase):
     def test_patterns_filters_default_uncolored(self):
         result, _ = self._call()
         self.assertEqual(result["patterns"], [])
+
+    # ── FL-default-color regression (bug: n=500/500 on real projects) ────────
+    #
+    # In production the handler kept ALL 500 default playlist slots (and all
+    # 127 mixer tracks, and many patterns) because FL Studio's getTrackColor /
+    # getPatternColor return the theme-default gray for untouched slots, not 0.
+    # The old `color == 0` check never matched, so filtering was effectively
+    # disabled and responses ballooned to ~30KB — near the macOS pipe buffer
+    # limit, causing the partial-write pain addressed by commit 3193b37.
+    #
+    # These tests pin the fix: the handler must treat the theme default color
+    # as "untouched" regardless of its specific value.
+
+    def test_playlist_skips_tracks_with_fl_default_color(self):
+        """All 500 playlist slots have FL's default (non-zero) color — skip all."""
+        self.mocks["playlist"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        result, _ = self._call()
+        self.assertEqual(result["playlist_tracks"], [])
+
+    def test_playlist_keeps_custom_colored_track_when_default_is_nonzero(self):
+        """Track 3 is user-colored red; the other 499 have FL's default gray.
+        Only track 3 should survive the filter."""
+        self.mocks["playlist"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        self.mocks["playlist"].colors = {3: 0xFF0000}
+        result, _ = self._call()
+        indices = [t["index"] for t in result["playlist_tracks"]]
+        self.assertEqual(indices, [3])
+
+    def test_playlist_keeps_named_track_when_default_color_nonzero(self):
+        """User-named track with default color must still survive."""
+        self.mocks["playlist"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        self.mocks["playlist"].names = {7: "Drums"}
+        result, _ = self._call()
+        indices = [t["index"] for t in result["playlist_tracks"]]
+        self.assertEqual(indices, [7])
+
+    def test_mixer_skips_tracks_with_fl_default_color(self):
+        """All 127 mixer inserts have FL's default color — only Master (0)
+        survives (explicit keep, not filter match)."""
+        self.mocks["mixer"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        result, _ = self._call()
+        indices = [t["index"] for t in result["mixer_tracks"]]
+        self.assertEqual(indices, [0])
+
+    def test_mixer_keeps_custom_colored_track_when_default_is_nonzero(self):
+        self.mocks["mixer"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        self.mocks["mixer"].colors = {10: 0xFF0000}
+        result, _ = self._call()
+        indices = [t["index"] for t in result["mixer_tracks"]]
+        self.assertIn(0, indices)   # Master always kept
+        self.assertIn(10, indices)  # User-colored kept
+        self.assertEqual(len(indices), 2)
+
+    def test_patterns_skips_slots_with_fl_default_color(self):
+        """Default patterns should be filtered even when their color is the
+        theme default (non-zero) rather than literal 0."""
+        self.mocks["patterns"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        result, _ = self._call()
+        self.assertEqual(result["patterns"], [])
+
+    def test_patterns_keeps_named_pattern_when_default_color_nonzero(self):
+        self.mocks["patterns"]._default_color = FL_DEFAULT_COLOR_SIGNED
+        self.mocks["patterns"].names = {2: "Main Groove"}
+        result, _ = self._call()
+        indices = [p["index"] for p in result["patterns"]]
+        self.assertEqual(indices, [2])
 
     # ── timing diagnostic ───────────────────────────────────────────────────
 

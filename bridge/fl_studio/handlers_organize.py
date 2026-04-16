@@ -68,6 +68,36 @@ def _cmd_get_project_state(params):
     def _is_default_pattern_name(name):
         return not name or name.startswith("Pattern ")
 
+    # FL Studio's *Color getters don't return 0 for untouched slots — they
+    # return the current theme's default (a signed int whose masked form is
+    # typically a gray like 0x636C71). The exact value varies by theme and
+    # version, so we can't hardcode a sentinel. Instead we sample the last
+    # few slots of each collection (statistically very unlikely to be user-
+    # touched in a 500-playlist / 127-mixer / 999-pattern FL project) and
+    # take the mode as the "untouched" baseline. Anything matching that
+    # baseline AND having a default name is skipped from the response.
+    #
+    # Trade-off: if a user has explicitly colored the trailing slots of a
+    # collection, the sampled baseline is their custom color, and other
+    # default slots with the real theme default will slip through the
+    # filter. That's an acceptable failure mode — worst case we return the
+    # pre-fix bloated payload for that one unusual project.
+    def _sample_default_color(getter, start, end, samples=5):
+        if end < start:
+            return 0
+        lo = max(start, end - samples + 1)
+        counts = {}
+        for i in range(lo, end + 1):
+            try:
+                c = getter(i) & 0xFFFFFF
+                counts[c] = counts.get(c, 0) + 1
+            except Exception:
+                continue
+        if not counts:
+            return 0
+        # Mode: survives a single outlier among the sampled slots.
+        return max(counts.items(), key=lambda kv: kv[1])[0]
+
     # ── Channel Rack ──────────────────────────────────────────────────────────
     _t_start = time.time()
     channel_list = []
@@ -98,12 +128,18 @@ def _cmd_get_project_state(params):
     _t_start = time.time()
     mixer_list = []
     mx_count = mixer.trackCount()
+    # Mixer is 0-indexed; sample from the tail (exclude Master at 0).
+    mx_default_color = _sample_default_color(
+        mixer.getTrackColor, 1, mx_count - 1
+    ) if mx_count > 1 else 0
     for i in range(mx_count):
         try:
             name = mixer.getTrackName(i) or ""
             color = mixer.getTrackColor(i) & 0xFFFFFF
-            # Skip cheaply before any extra getters fire.
-            if i != 0 and _is_default_mixer_name(name, i) and color == 0:
+            # Skip cheaply before any extra getters fire. Treat both literal
+            # zero and the sampled theme default as "uncolored".
+            if (i != 0 and _is_default_mixer_name(name, i)
+                    and color in (0, mx_default_color)):
                 continue
             volume = round(mixer.getTrackVolume(i), 3)
             pan = round(mixer.getTrackPan(i), 3)
@@ -124,11 +160,15 @@ def _cmd_get_project_state(params):
     _t_start = time.time()
     playlist_list = []
     pl_count = playlist.trackCount()
+    pl_default_color = _sample_default_color(
+        playlist.getTrackColor, 1, pl_count
+    )
     for i in range(1, pl_count + 1):
         try:
             name = playlist.getTrackName(i) or ""
             color = playlist.getTrackColor(i) & 0xFFFFFF
-            if _is_default_playlist_name(name) and color == 0:
+            if (_is_default_playlist_name(name)
+                    and color in (0, pl_default_color)):
                 continue
             playlist_list.append({
                 "index": i,
@@ -143,11 +183,15 @@ def _cmd_get_project_state(params):
     _t_start = time.time()
     pattern_list = []
     pat_count = patterns.patternCount()
+    pat_default_color = _sample_default_color(
+        patterns.getPatternColor, 1, pat_count
+    )
     for i in range(1, pat_count + 1):
         try:
             name = patterns.getPatternName(i) or ""
             color = patterns.getPatternColor(i) & 0xFFFFFF
-            if _is_default_pattern_name(name) and color == 0:
+            if (_is_default_pattern_name(name)
+                    and color in (0, pat_default_color)):
                 continue
             pattern_list.append({
                 "index": i,

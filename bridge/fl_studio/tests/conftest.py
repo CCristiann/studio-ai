@@ -120,6 +120,11 @@ def _make_mixer_mock():
     mod.colors = {}
     mod.calls = []
     mod._track_count = 127  # FL 20+ default
+    # Real FL returns the theme's default color (a signed int like -10261391 =
+    # 0xFF636C71) for uncolored tracks — not 0. Tests override this to simulate
+    # the bug reproduction; default stays 0 for backward compatibility with
+    # pre-existing tests that assume mask-to-zero for untouched slots.
+    mod._default_color = 0
 
     def trackCount():
         return mod._track_count
@@ -132,7 +137,7 @@ def _make_mixer_mock():
         mod.names[i] = name
 
     def getTrackColor(i):
-        return mod.colors.get(i, 0)
+        return mod.colors.get(i, mod._default_color)
 
     def setTrackColor(i, color):
         mod.calls.append(("setTrackColor", i, color))
@@ -188,6 +193,8 @@ def _make_playlist_mock():
     mod.colors = {}       # 1-indexed
     mod.calls = []
     mod._track_count = 500
+    # See _make_mixer_mock comment: FL returns a theme-default signed int, not 0.
+    mod._default_color = 0
 
     def trackCount():
         return mod._track_count
@@ -200,7 +207,7 @@ def _make_playlist_mock():
         mod.names[i] = name
 
     def getTrackColor(i):
-        return mod.colors.get(i, 0)
+        return mod.colors.get(i, mod._default_color)
 
     def setTrackColor(i, color):
         mod.calls.append(("setTrackColor", i, color))
@@ -220,6 +227,8 @@ def _make_patterns_mock():
     mod.colors = {}       # 1-indexed
     mod.calls = []
     mod._pattern_count = 999
+    # See _make_mixer_mock comment: FL returns a theme-default signed int, not 0.
+    mod._default_color = 0
 
     def patternCount():
         return mod._pattern_count
@@ -232,7 +241,7 @@ def _make_patterns_mock():
         mod.names[i] = name
 
     def getPatternColor(i):
-        return mod.colors.get(i, 0)
+        return mod.colors.get(i, mod._default_color)
 
     def setPatternColor(i, color):
         mod.calls.append(("setPatternColor", i, color))
