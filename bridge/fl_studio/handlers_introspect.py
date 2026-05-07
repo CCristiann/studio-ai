@@ -108,6 +108,25 @@ def _cmd_get_capabilities(_params):
     return _probe_capabilities()
 
 
+def _channel_plugin(idx):
+    """Return {name, type, type_label} for a channel, or None on error."""
+    import channels
+    import plugins
+    try:
+        type_code = int(channels.getChannelType(idx))
+    except Exception:
+        return None
+    try:
+        plugin_name = plugins.getPluginName(idx, -1) or ""
+    except Exception:
+        plugin_name = ""
+    return {
+        "name":       plugin_name,
+        "type":       type_code,
+        "type_label": _CHANNEL_TYPE_LABELS.get(type_code, "unknown"),
+    }
+
+
 # Handler registry — populated as later tasks add commands.
 INTROSPECT_HANDLERS = {
     # Note: get_project_state is NOT yet registered here. Task 9 adds it.

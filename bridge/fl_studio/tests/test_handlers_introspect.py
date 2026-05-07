@@ -102,5 +102,54 @@ class CapabilityProbeTests(unittest.TestCase):
         self.assertTrue(second["_has_floor_core"])
 
 
+class ChannelPluginTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_channel_plugin_vst(self):
+        self.mocks["channels"].types = {3: 2}
+        self.mocks["plugins"].names = {(3, -1): "Sytrus"}
+        self.mocks["plugins"].valid = {(3, -1): True}
+        result = self.module._channel_plugin(3)
+        self.assertEqual(result, {"name": "Sytrus", "type": 2, "type_label": "vst"})
+
+    def test_channel_plugin_sampler(self):
+        self.mocks["channels"].types = {0: 0}
+        self.mocks["plugins"].names = {(0, -1): ""}
+        result = self.module._channel_plugin(0)
+        self.assertEqual(result, {"name": "", "type": 0, "type_label": "sampler"})
+
+    def test_channel_plugin_unknown_type_code(self):
+        self.mocks["channels"].types = {1: 99}
+        self.mocks["plugins"].names = {(1, -1): "Mystery"}
+        result = self.module._channel_plugin(1)
+        self.assertEqual(result, {"name": "Mystery", "type": 99, "type_label": "unknown"})
+
+    def test_channel_plugin_returns_none_when_get_channel_type_raises(self):
+        def boom(_i):
+            raise RuntimeError("boom")
+        self.mocks["channels"].getChannelType = boom
+        result = self.module._channel_plugin(0)
+        self.assertIsNone(result)
+
+    def test_channel_plugin_empty_name_when_get_plugin_name_raises(self):
+        self.mocks["channels"].types = {0: 2}
+        def boom(*a, **k):
+            raise RuntimeError("boom")
+        self.mocks["plugins"].getPluginName = boom
+        result = self.module._channel_plugin(0)
+        self.assertEqual(result, {"name": "", "type": 2, "type_label": "vst"})
+
+
 if __name__ == "__main__":
     unittest.main()
