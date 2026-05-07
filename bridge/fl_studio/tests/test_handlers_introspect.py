@@ -422,5 +422,70 @@ class TruncationTests(unittest.TestCase):
         self.assertNotIn("truncated_sections", result)
 
 
+class GetMixerChainTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_returns_loaded_slots_with_names_and_color(self):
+        self.mocks["plugins"].valid = {(7, 0): True, (7, 2): True}
+        self.mocks["plugins"].names = {(7, 0): "Pro-Q 3", (7, 2): "Pro-C 2"}
+        self.mocks["mixer"].slot_colors = {(7, 0): 0xFF0000, (7, 2): 0x00FF00}
+        self.mocks["mixer"].slots_enabled = {7: True}
+        result = self.module._cmd_get_mixer_chain({"index": 7})
+        self.assertEqual(result["index"], 7)
+        self.assertTrue(result["slots_enabled"])
+        self.assertEqual(len(result["slots"]), 2)
+        self.assertEqual(result["slots"][0]["plugin_name"], "Pro-Q 3")
+        self.assertEqual(result["slots"][0]["color"], 0xFF0000)
+
+    def test_skips_invalid_slots_silently(self):
+        self.mocks["plugins"].valid = {(7, 0): True, (7, 5): True}
+        self.mocks["plugins"].names = {(7, 0): "X", (7, 5): "Y"}
+        result = self.module._cmd_get_mixer_chain({"index": 7})
+        slot_indices = [s["slot_index"] for s in result["slots"]]
+        self.assertEqual(slot_indices, [0, 5])
+
+    def test_continues_past_per_slot_exception(self):
+        def flaky(track, slot, useGlobalIndex=False):
+            if slot == 3:
+                raise RuntimeError("boom")
+            return (track, slot) in {(7, 0), (7, 5)}
+        self.mocks["plugins"].isValid = flaky
+        self.mocks["plugins"].names = {(7, 0): "A", (7, 5): "B"}
+        result = self.module._cmd_get_mixer_chain({"index": 7})
+        slot_indices = [s["slot_index"] for s in result["slots"]]
+        self.assertEqual(slot_indices, [0, 5])
+
+    def test_invalid_track_index_returns_error(self):
+        result = self.module._cmd_get_mixer_chain({"index": 200})
+        self.assertEqual(result.get("success"), False)
+        self.assertEqual(result.get("error"), "INVALID_TRACK_INDEX")
+        self.assertEqual(result.get("track_count"), 127)
+
+    def test_omits_color_when_capability_absent(self):
+        del self.mocks["mixer"].getSlotColor
+        self.mocks["plugins"].valid = {(7, 0): True}
+        self.mocks["plugins"].names = {(7, 0): "P"}
+        result = self.module._cmd_get_mixer_chain({"index": 7})
+        self.assertNotIn("color", result["slots"][0])
+
+    def test_slots_enabled_reflects_track_state(self):
+        self.mocks["plugins"].valid = {(7, 0): True}
+        self.mocks["plugins"].names = {(7, 0): "P"}
+        self.mocks["mixer"].slots_enabled = {7: False}
+        result = self.module._cmd_get_mixer_chain({"index": 7})
+        self.assertFalse(result["slots_enabled"])
+
+
 if __name__ == "__main__":
     unittest.main()

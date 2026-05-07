@@ -462,9 +462,59 @@ def _cmd_get_project_state(params):
     return response
 
 
+def _cmd_get_mixer_chain(params):
+    """Effect-slot enumeration for one mixer track.
+
+    Returns:
+      Out-of-range: {success: False, error: "INVALID_TRACK_INDEX", track_count: N}
+      Valid: {index, slots_enabled, slots: [...]}
+    """
+    import mixer
+    import plugins
+    track = int((params or {}).get("index", 0))
+    track_count = mixer.trackCount()
+    if track < 0 or track >= track_count:
+        return {
+            "success":     False,
+            "error":       "INVALID_TRACK_INDEX",
+            "track_count": track_count,
+        }
+
+    has_slot_color = hasattr(mixer, "getSlotColor")
+    slots_enabled = True
+    try:
+        slots_enabled = bool(mixer.isTrackSlotsEnabled(track))
+    except Exception:
+        pass
+
+    slots = []
+    for slot in range(10):
+        try:
+            if not bool(plugins.isValid(track, slot)):
+                continue
+        except Exception:
+            continue
+        try:
+            entry = {
+                "slot_index":  slot,
+                "plugin_name": plugins.getPluginName(track, slot) or "",
+            }
+            if has_slot_color:
+                try:
+                    entry["color"] = int(mixer.getSlotColor(track, slot)) & 0xFFFFFF
+                except Exception:
+                    pass
+            slots.append(entry)
+        except Exception:
+            continue
+
+    return {"index": track, "slots_enabled": slots_enabled, "slots": slots}
+
+
 # Handler registry — get_project_state registered by Task 9.
 # The capabilities probe is internal-only (not in the registry).
 INTROSPECT_HANDLERS = {}
 
 # Register so device_studio_ai.py picks it up after Task 14 wires the dict.
 INTROSPECT_HANDLERS["get_project_state"] = _cmd_get_project_state
+INTROSPECT_HANDLERS["get_mixer_chain"] = _cmd_get_mixer_chain
