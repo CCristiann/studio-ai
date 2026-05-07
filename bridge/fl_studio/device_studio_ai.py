@@ -48,6 +48,7 @@ import device
 from _protocol import encode_sysex, decode_sysex, TAG_CMD, TAG_RESP
 from handlers_organize import ORGANIZE_HANDLERS
 from handlers_bulk import BULK_HANDLERS
+from handlers_introspect import INTROSPECT_HANDLERS
 
 try:
     from ipc_transport import transport as _transport
@@ -327,8 +328,8 @@ def _cmd_rename_track(params):
 
 _HANDLERS = {
     "set_bpm": _cmd_set_bpm,
-    "get_state": _cmd_get_state,
-    "get_project_state": _cmd_get_state,
+    "get_state": _cmd_get_state,           # legacy alias retained
+    "get_project_state": _cmd_get_state,   # overridden below by INTROSPECT_HANDLERS
     "add_track": _cmd_add_track,
     "play": _cmd_play,
     "stop": _cmd_stop,
@@ -340,6 +341,8 @@ _HANDLERS = {
     "rename_track": _cmd_rename_track,
     **ORGANIZE_HANDLERS,
     **BULK_HANDLERS,
+    **INTROSPECT_HANDLERS,                 # MUST be last so its
+                                           # get_project_state wins.
 }
 
 
