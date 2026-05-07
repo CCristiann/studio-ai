@@ -104,7 +104,10 @@ def _make_channels_mock():
         return 0
 
     def getChannelType(i):
-        return int(mod.types.get(i, 2))   # default to "vst"
+        # Default 0 (sampler) matches real FL: channels created via the
+        # channel rack default to sampler. Tests that need a different
+        # type must set mod.types[i] explicitly.
+        return int(mod.types.get(i, 0))
 
     def selectedChannel():
         return int(mod._selected_channel)
@@ -124,7 +127,7 @@ def _make_channels_mock():
     mod.setChannelPan = setChannelPan
     mod.getGridBit = getGridBit
     mod.getGridBitWithoutCache = getGridBitWithoutCache
-    mod.getChannelType  = getChannelType
+    mod.getChannelType = getChannelType
     mod.selectedChannel = selectedChannel
     return mod
 
@@ -353,8 +356,8 @@ def _make_plugins_mock():
 
     def getParamValue(param_idx, target, slot, useGlobalIndex=False):
         if mod._sleep_per_param_s:
-            import time as _time
-            _time.sleep(mod._sleep_per_param_s)
+            import time
+            time.sleep(mod._sleep_per_param_s)
         return float(mod.param_values.get((target, slot, param_idx), 0.0))
 
     def getParamValueString(param_idx, target, slot, useGlobalIndex=False):
@@ -393,6 +396,7 @@ def install_fl_mocks():
     }
     for name, mod in mocks.items():
         sys.modules[name] = mod
+    # Stub midi module — handlers_organize and other handlers reference midi.REC_*
     midi_mod = types.ModuleType("midi")
     midi_mod.REC_MainPitch     = 0
     midi_mod.REC_Tempo         = 1
