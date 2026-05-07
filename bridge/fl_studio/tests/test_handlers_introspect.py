@@ -265,5 +265,101 @@ class SmallHelperTests(unittest.TestCase):
         self.assertIsNone(sel["mixer_track_index"])
 
 
+class GetProjectStateTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def _set_one_channel(self, idx, name, type_code, plugin_name):
+        self.mocks["channels"].names = {idx: name}
+        self.mocks["channels"].types = {idx: type_code}
+        self.mocks["plugins"].names = {(idx, -1): plugin_name}
+
+    def test_returns_floor_unsupported_when_floor_core_missing(self):
+        del self.mocks["channels"].getChannelType
+        result = self.module._cmd_get_project_state({})
+        self.assertEqual(result.get("success"), False)
+        self.assertEqual(result.get("error"), "FL_VERSION_UNSUPPORTED")
+
+    def test_includes_top_level_metadata(self):
+        result = self.module._cmd_get_project_state({})
+        self.assertIn("bpm", result)
+        self.assertIn("project_name", result)
+        self.assertIn("playing", result)
+        self.assertIn("snapshot_at", result)
+        self.assertIn("capabilities", result)
+        self.assertIn("selection", result)
+
+    def test_channel_includes_plugin_object(self):
+        self._set_one_channel(0, "Lead", 2, "Sytrus")
+        result = self.module._cmd_get_project_state({})
+        self.assertEqual(len(result["channels"]), 1)
+        ch = result["channels"][0]
+        self.assertEqual(ch["plugin"], {"name": "Sytrus", "type": 2, "type_label": "vst"})
+
+    def test_mixer_track_includes_slot_count_and_routes(self):
+        self.mocks["mixer"].names = {7: "DRUMS"}
+        self.mocks["plugins"].valid = {(7, 0): True, (7, 1): True}
+        self.mocks["mixer"].routes = {(7, 88): True}
+        self.mocks["mixer"].route_levels = {(7, 88): 0.7}
+        result = self.module._cmd_get_project_state({})
+        track = next(t for t in result["mixer_tracks"] if t["index"] == 7)
+        self.assertEqual(track["slot_count"], 2)
+        self.assertEqual(track["routes_to"], [{"to_index": 88, "level": 0.7}])
+
+    def test_filtering_includes_track_with_only_slots_loaded(self):
+        # No name, no color, but ≥1 loaded slot — should be retained
+        self.mocks["plugins"].valid = {(15, 0): True}
+        result = self.module._cmd_get_project_state({})
+        indices = [t["index"] for t in result["mixer_tracks"]]
+        self.assertIn(15, indices)
+
+    def test_filtering_includes_track_with_only_outbound_route(self):
+        self.mocks["mixer"].routes = {(20, 88): True}
+        result = self.module._cmd_get_project_state({})
+        indices = [t["index"] for t in result["mixer_tracks"]]
+        self.assertIn(20, indices)
+
+    def test_pattern_length_included_when_capability_present(self):
+        self.mocks["patterns"].names = {1: "Verse"}
+        self.mocks["patterns"].lengths = {1: 16}
+        result = self.module._cmd_get_project_state({})
+        pat = next(p for p in result["patterns"] if p["index"] == 1)
+        self.assertEqual(pat["length_beats"], 16)
+
+    def test_pattern_length_omitted_when_capability_absent(self):
+        del self.mocks["patterns"].getPatternLength
+        self.mocks["patterns"].names = {1: "Verse"}
+        result = self.module._cmd_get_project_state({})
+        pat = next(p for p in result["patterns"] if p["index"] == 1)
+        self.assertNotIn("length_beats", pat)
+
+    def test_routes_to_excludes_level_when_capability_absent(self):
+        del self.mocks["mixer"].getRouteToLevel
+        self.mocks["mixer"].names = {5: "Bus"}
+        self.mocks["mixer"].routes = {(5, 88): True}
+        result = self.module._cmd_get_project_state({})
+        track = next(t for t in result["mixer_tracks"] if t["index"] == 5)
+        self.assertEqual(track["routes_to"], [{"to_index": 88}])
+
+    def test_selection_state_in_response(self):
+        self.mocks["channels"]._selected_channel = 3
+        self.mocks["patterns"]._selected_pattern = 5
+        self.mocks["mixer"]._selected_track = 7
+        result = self.module._cmd_get_project_state({})
+        self.assertEqual(result["selection"], {
+            "channel_index": 3, "pattern_index": 5, "mixer_track_index": 7,
+        })
+
+
 if __name__ == "__main__":
     unittest.main()
