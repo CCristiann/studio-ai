@@ -1,11 +1,9 @@
 // apps/web/src/lib/ai/organize/_shared.ts
 /**
- * Shared helpers used by both:
- *   - apps/web/src/lib/ai/tools/organize.ts
- *   - apps/web/src/app/api/ai/organize/route.ts
+ * Shared helpers for the organize agent — used by `apps/web/src/lib/ai/tools/organize.ts`.
  *
- * Extracted to avoid duplication and to fix a regression where the bulk-apply
- * fold was only mapping channel actions, silently dropping rename_mixer_track,
+ * Originally extracted to fix a regression where the bulk-apply fold was only
+ * mapping channel actions, silently dropping rename_mixer_track,
  * set_mixer_track_color, rename_pattern, and set_pattern_color.
  */
 
