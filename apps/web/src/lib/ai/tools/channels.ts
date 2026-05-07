@@ -66,5 +66,21 @@ export function channelTools(userId: string) {
       }),
       toRelay: ({ query, limit }) => ({ action: "find_channel_by_name", params: { query, limit } }),
     }),
+
+    get_channel_plugin_params: relayTool(userId, {
+      description:
+        "Dump parameter values for the plugin loaded on one channel rack entry. " +
+        "Same caveats as get_mixer_plugin_params. Returns " +
+        "{ success: false, error: 'INVALID_TARGET' } if the channel has no plugin " +
+        "(e.g. a Sampler channel with no instrument).",
+      inputSchema: z.object({
+        channel_index: CH_INDEX,
+        max_params: z.number().int().min(1).max(500).optional().default(64),
+      }),
+      toRelay: ({ channel_index, max_params }) => ({
+        action: "get_channel_plugin_params",
+        params: { channel_index, max_params },
+      }),
+    }),
   };
 }
