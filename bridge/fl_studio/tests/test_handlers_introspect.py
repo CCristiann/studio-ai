@@ -200,6 +200,17 @@ class MixerRoutesTests(unittest.TestCase):
         targets = sorted(r["to_index"] for r in result)
         self.assertEqual(targets, [7, 12])
 
+    def test_mixer_routes_appends_entry_without_level_when_get_route_to_level_raises(self):
+        # When getRouteSendActive returns true but getRouteToLevel raises,
+        # the route is still recorded — without the `level` key, not dropped.
+        self.mocks["mixer"].routes = {(5, 7): True}
+        def boom(src, dst):
+            raise RuntimeError("level read failed")
+        self.mocks["mixer"].getRouteToLevel = boom
+        result = self.module._mixer_routes(5)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], {"to_index": 7})  # no `level` key
+
 
 if __name__ == "__main__":
     unittest.main()
