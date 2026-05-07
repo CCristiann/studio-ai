@@ -54,6 +54,18 @@ describe("projectStateToMap", () => {
     expect(map.channels[0].plugin).toBe("(unknown)");
   });
 
+  it("formats empty-name plugin as '(type_label)' without leading space", () => {
+    // Spec §10: sampler channel with no instrument loaded sends
+    // { name: "", type: 0, type_label: "sampler" }
+    const state = baseState();
+    state.channels = [{
+      index: 0, name: "Channel 1", color: 0, volume: 0.78, pan: 0, enabled: true, insert: 1,
+      plugin: { name: "", type: 0, type_label: "sampler" },
+    }];
+    const map = projectStateToMap(state);
+    expect(map.channels[0].plugin).toBe("(sampler)");
+  });
+
   it("preserves all other channel fields verbatim", () => {
     const state = baseState();
     state.channels = [{
