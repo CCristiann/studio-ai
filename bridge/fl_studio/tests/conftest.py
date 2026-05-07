@@ -17,6 +17,7 @@ def _make_general_mock():
     mod.calls = []  # ordered call log
     mod._save_undo_supported = True
     mod._save_undo_should_raise = False
+    mod._api_version = 36   # FL 2024 default for tests
 
     def saveUndo(label, flags=0):
         mod.calls.append(("saveUndo", label, flags))
@@ -32,10 +33,14 @@ def _make_general_mock():
     def processRECEvent(event_id, value, flags):
         mod.calls.append(("processRECEvent", event_id, value, flags))
 
+    def getVersion():
+        return int(mod._api_version)
+
     mod.saveUndo = saveUndo
     mod.undoUp = undoUp
     mod.getProjectTitle = getProjectTitle
     mod.processRECEvent = processRECEvent
+    mod.getVersion = getVersion
     return mod
 
 
@@ -46,6 +51,8 @@ def _make_channels_mock():
     mod.inserts = {}      # {index: int}
     mod.muted = {}        # {index: bool}
     mod.calls = []
+    mod.types = {}              # {index: int channel-type code}
+    mod._selected_channel = 0
 
     def channelCount():
         return len(mod.names)
@@ -96,6 +103,12 @@ def _make_channels_mock():
     def getGridBitWithoutCache(i, step):
         return 0
 
+    def getChannelType(i):
+        return int(mod.types.get(i, 2))   # default to "vst"
+
+    def selectedChannel():
+        return int(mod._selected_channel)
+
     mod.channelCount = channelCount
     mod.getChannelName = getChannelName
     mod.setChannelName = setChannelName
@@ -111,6 +124,8 @@ def _make_channels_mock():
     mod.setChannelPan = setChannelPan
     mod.getGridBit = getGridBit
     mod.getGridBitWithoutCache = getGridBitWithoutCache
+    mod.getChannelType  = getChannelType
+    mod.selectedChannel = selectedChannel
     return mod
 
 
@@ -125,6 +140,12 @@ def _make_mixer_mock():
     # the bug reproduction; default stays 0 for backward compatibility with
     # pre-existing tests that assume mask-to-zero for untouched slots.
     mod._default_color = 0
+    mod.routes = {}           # {(src, dst): bool}
+    mod.route_levels = {}     # {(src, dst): float}
+    mod.eq = {}               # {(track, band): {"gain": f, "freq": f, "bw": f}}
+    mod.slot_colors = {}      # {(track, slot): int}
+    mod.slots_enabled = {}    # {track: bool}
+    mod._selected_track = 0
 
     def trackCount():
         return mod._track_count
@@ -170,6 +191,30 @@ def _make_mixer_mock():
     def setTrackEQBW(*args):
         mod.calls.append(("setTrackEQBW",) + args)
 
+    def getRouteSendActive(src, dst):
+        return bool(mod.routes.get((src, dst), False))
+
+    def getRouteToLevel(src, dst):
+        return float(mod.route_levels.get((src, dst), 0.8))
+
+    def getEqGain(track, band):
+        return float(mod.eq.get((track, band), {"gain": 0.5}).get("gain", 0.5))
+
+    def getEqFrequency(track, band):
+        return float(mod.eq.get((track, band), {"freq": 0.5}).get("freq", 0.5))
+
+    def getEqBandwidth(track, band):
+        return float(mod.eq.get((track, band), {"bw": 0.5}).get("bw", 0.5))
+
+    def getSlotColor(track, slot):
+        return int(mod.slot_colors.get((track, slot), 0))
+
+    def isTrackSlotsEnabled(track):
+        return bool(mod.slots_enabled.get(track, True))
+
+    def trackNumber():
+        return int(mod._selected_track)
+
     mod.trackCount = trackCount
     mod.getTrackName = getTrackName
     mod.setTrackName = setTrackName
@@ -184,6 +229,14 @@ def _make_mixer_mock():
     mod.setTrackEQGain = setTrackEQGain
     mod.setTrackEQFreq = setTrackEQFreq
     mod.setTrackEQBW = setTrackEQBW
+    mod.getRouteSendActive   = getRouteSendActive
+    mod.getRouteToLevel      = getRouteToLevel
+    mod.getEqGain            = getEqGain
+    mod.getEqFrequency       = getEqFrequency
+    mod.getEqBandwidth       = getEqBandwidth
+    mod.getSlotColor         = getSlotColor
+    mod.isTrackSlotsEnabled  = isTrackSlotsEnabled
+    mod.trackNumber          = trackNumber
     return mod
 
 
@@ -229,6 +282,8 @@ def _make_patterns_mock():
     mod._pattern_count = 999
     # See _make_mixer_mock comment: FL returns a theme-default signed int, not 0.
     mod._default_color = 0
+    mod.lengths = {}           # {index: int beats}
+    mod._selected_pattern = 1
 
     def patternCount():
         return mod._pattern_count
@@ -247,30 +302,101 @@ def _make_patterns_mock():
         mod.calls.append(("setPatternColor", i, color))
         mod.colors[i] = color
 
+    def getPatternLength(i):
+        return int(mod.lengths.get(i, 0))
+
+    def patternNumber():
+        return int(mod._selected_pattern)
+
     mod.patternCount = patternCount
     mod.getPatternName = getPatternName
     mod.setPatternName = setPatternName
     mod.getPatternColor = getPatternColor
     mod.setPatternColor = setPatternColor
+    mod.getPatternLength = getPatternLength
+    mod.patternNumber    = patternNumber
+    return mod
+
+
+def _make_plugins_mock():
+    """Mock for FL's `plugins` module: tracks per-(target, slot) state.
+
+    Address conventions (matching real FL):
+      - Mixer slot plugin: target = mixer track index, slot in 0..9
+      - Channel rack plugin: target = channel index, slot = -1
+    `valid` defaults to {}, so isValid returns False unless explicitly set.
+    """
+    mod = types.ModuleType("plugins")
+    mod.valid = {}        # {(target, slot): bool}
+    mod.names = {}        # {(target, slot): str}
+    mod.param_counts = {} # {(target, slot): int}
+    mod.param_names = {}  # {(target, slot, param_idx): str}
+    mod.param_values = {} # {(target, slot, param_idx): float}
+    mod.param_value_strings = {}  # {(target, slot, param_idx): str}
+    mod._raise_on_param = set()   # {(target, slot, param_idx)}
+    mod._sleep_per_param_s = 0.0  # for time-budget tests
+    mod.calls = []
+
+    def isValid(target, slot, useGlobalIndex=False):
+        return bool(mod.valid.get((target, slot), False))
+
+    def getPluginName(target, slot, useGlobalIndex=False):
+        return mod.names.get((target, slot), "")
+
+    def getParamCount(target, slot, useGlobalIndex=False):
+        return int(mod.param_counts.get((target, slot), 0))
+
+    def getParamName(param_idx, target, slot, useGlobalIndex=False):
+        if (target, slot, param_idx) in mod._raise_on_param:
+            raise RuntimeError("simulated FL param error")
+        return mod.param_names.get((target, slot, param_idx), "")
+
+    def getParamValue(param_idx, target, slot, useGlobalIndex=False):
+        if mod._sleep_per_param_s:
+            import time as _time
+            _time.sleep(mod._sleep_per_param_s)
+        return float(mod.param_values.get((target, slot, param_idx), 0.0))
+
+    def getParamValueString(param_idx, target, slot, useGlobalIndex=False):
+        return mod.param_value_strings.get((target, slot, param_idx), "")
+
+    mod.isValid = isValid
+    mod.getPluginName = getPluginName
+    mod.getParamCount = getParamCount
+    mod.getParamName = getParamName
+    mod.getParamValue = getParamValue
+    mod.getParamValueString = getParamValueString
+    return mod
+
+
+def _make_ui_mock():
+    mod = types.ModuleType("ui")
+    mod._fl_version_tuple = (21, 2, 3, 4321)
+
+    def getVersion(mode=0):
+        return tuple(mod._fl_version_tuple)
+
+    mod.getVersion = getVersion
     return mod
 
 
 def install_fl_mocks():
     """Install fresh FL module mocks for one test. Returns dict for assertions."""
     mocks = {
-        "general": _make_general_mock(),
+        "general":  _make_general_mock(),
         "channels": _make_channels_mock(),
-        "mixer": _make_mixer_mock(),
+        "mixer":    _make_mixer_mock(),
         "playlist": _make_playlist_mock(),
         "patterns": _make_patterns_mock(),
+        "plugins":  _make_plugins_mock(),
+        "ui":       _make_ui_mock(),
     }
     for name, mod in mocks.items():
         sys.modules[name] = mod
-    # Also a stub midi module since handlers_organize uses it
     midi_mod = types.ModuleType("midi")
-    midi_mod.REC_MainPitch = 0
-    midi_mod.REC_Tempo = 1
-    midi_mod.REC_Control = 2
+    midi_mod.REC_MainPitch     = 0
+    midi_mod.REC_Tempo         = 1
+    midi_mod.REC_Control       = 2
     midi_mod.REC_UpdateControl = 4
     sys.modules["midi"] = midi_mod
     sys.modules["transport"] = types.ModuleType("transport")
@@ -280,5 +406,6 @@ def install_fl_mocks():
 
 def uninstall_fl_mocks():
     """Remove all FL module mocks (and stubs) from sys.modules."""
-    for name in ("general", "channels", "mixer", "playlist", "patterns", "midi", "transport"):
+    for name in ("general", "channels", "mixer", "playlist", "patterns",
+                 "plugins", "ui", "midi", "transport"):
         sys.modules.pop(name, None)
