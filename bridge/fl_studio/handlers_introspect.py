@@ -8,6 +8,7 @@ Capability detection (§5 of the design spec) gates every version-dependent
 FL function. Permissive defaults survive cold-start race where FL modules
 have not yet been populated.
 """
+import re
 import time
 
 # Module-level capability cache. None = unprobed; api_version=0 = probe failed
@@ -23,6 +24,12 @@ _CHANNEL_TYPE_LABELS = {
     4: "automation",
     5: "layer",
 }
+
+# Hard caps per spec §6.2
+MAX_CHANNELS_INTROSPECTED        = 256
+MAX_PATTERNS                     = 256
+MAX_PLAYLIST_TRACKS              = 256
+MAX_RETAINED_INSERTS_FOR_ROUTING = 100
 
 
 def _probe_capabilities():
@@ -207,7 +214,8 @@ def _is_default_mixer_name(name, idx):
         return True
     if idx == 0 and name == "Master":
         return False
-    return name.startswith("Insert ") or name == "Current"
+    # Match exactly "Insert N" (digit-only suffix) — "Insert 1X" is a custom name.
+    return bool(re.match(r"^Insert \d+$", name)) or name == "Current"
 
 
 def _is_default_playlist_name(name):
@@ -239,7 +247,14 @@ def _cmd_get_project_state(params):
     """Extended project state with plugin identity, routing, slot counts,
     pattern length, selection state, and capabilities.
 
-    See spec §4.1 for the response shape.
+    Params:
+      include_routing (bool, default True): if false, skip mixer routing
+        sweep entirely (routes_to: [] for every track).
+
+    Hard caps (see spec §6.2):
+      MAX_CHANNELS_INTROSPECTED, MAX_PATTERNS, MAX_PLAYLIST_TRACKS,
+      MAX_RETAINED_INSERTS_FOR_ROUTING. Truncation surfaces in
+      `truncated_sections`.
     """
     caps = _probe_capabilities()
     if not caps["_has_floor_core"]:
@@ -250,6 +265,8 @@ def _cmd_get_project_state(params):
             "api_version": caps["api_version"],
         }
 
+    include_routing = bool((params or {}).get("include_routing", True))
+
     import general
     import mixer
     import channels
@@ -257,53 +274,59 @@ def _cmd_get_project_state(params):
     import playlist
     import transport
 
+    truncated_sections = []
+    routing_swept_through = None
+
     t0 = time.time()
     bpm = float(mixer.getCurrentTempo()) / 1000.0
     project_name = general.getProjectTitle() or "Untitled"
     is_playing = bool(transport.isPlaying())
 
-    # ── Channels (always all) ─────────────────────────────────────
+    # ── Channels (cap at MAX_CHANNELS_INTROSPECTED) ───────────────
     channel_list = []
-    for i in range(channels.channelCount()):
+    ch_count_total = channels.channelCount()
+    ch_count = min(ch_count_total, MAX_CHANNELS_INTROSPECTED)
+    for i in range(ch_count):
         try:
-            color = channels.getChannelColor(i) & 0xFFFFFF
-            volume = round(channels.getChannelVolume(i), 3)
-            pan = round(channels.getChannelPan(i), 3)
-            enabled = not bool(channels.isChannelMuted(i))
-            insert = channels.getTargetFxTrack(i)
             channel_list.append({
                 "index":   i,
                 "name":    channels.getChannelName(i) or "",
-                "color":   color,
-                "volume":  volume,
-                "pan":     pan,
-                "enabled": enabled,
-                "insert":  insert,
+                "color":   channels.getChannelColor(i) & 0xFFFFFF,
+                "volume":  round(channels.getChannelVolume(i), 3),
+                "pan":     round(channels.getChannelPan(i), 3),
+                "enabled": not bool(channels.isChannelMuted(i)),
+                "insert":  channels.getTargetFxTrack(i),
                 "plugin":  _channel_plugin(i),
             })
         except Exception:
             pass
+    if ch_count_total > ch_count:
+        truncated_sections.append("channels")
 
-    # ── Mixer (filter; keep tracks with name OR color OR ≥1 slot OR ≥1 route) ──
+    # ── Mixer: pass 1 — filter retain set without routing ─────────
     mixer_list = []
     mx_count = mixer.trackCount()
     mx_default_color = _sample_default_color(
         mixer.getTrackColor, 1, mx_count - 1
     ) if mx_count > 1 else 0
+    retained_for_routing = []   # cheap-retained tracks; cap applies here
+    route_only_candidates = []  # bare tracks (no name/color/slots); checked for
+                                # outbound routes regardless of cap
+    track_data = {}             # {index: {entry dict}} for pass-2 augmentation
     for i in range(mx_count):
         try:
             name = mixer.getTrackName(i) or ""
             color = mixer.getTrackColor(i) & 0xFFFFFF
             slot_count = _mixer_slot_count(i)
-            routes_to = _mixer_routes(i) if i > 0 else []  # Master rarely sends; cheap optimization
-            is_default = (i != 0
-                          and _is_default_mixer_name(name, i)
-                          and color in (0, mx_default_color)
-                          and slot_count == 0
-                          and not routes_to)
-            if is_default:
-                continue
-            mixer_list.append({
+            # Retain decision uses cheap signals first; routing-based retention
+            # is computed in pass 2 if include_routing.
+            retain_by_cheap = (
+                i == 0  # Master always
+                or not _is_default_mixer_name(name, i)
+                or color not in (0, mx_default_color)
+                or slot_count > 0
+            )
+            entry = {
                 "index":      i,
                 "name":       name,
                 "color":      color,
@@ -311,16 +334,67 @@ def _cmd_get_project_state(params):
                 "pan":        round(mixer.getTrackPan(i), 3),
                 "muted":      bool(mixer.isTrackMuted(i)),
                 "slot_count": slot_count,
-                "routes_to":  routes_to,
-            })
+                "routes_to":  [],   # filled in pass 2
+            }
+            track_data[i] = entry
+            if retain_by_cheap:
+                mixer_list.append(entry)
+                retained_for_routing.append(i)
+            elif include_routing and i != 0:
+                # Bare track: could still be retained if it has outbound routes.
+                # Add as a route-only candidate (checked in pass 2 separately
+                # from the cap, since these tracks have no other retention reason).
+                route_only_candidates.append(i)
         except Exception:
             pass
 
-    # ── Playlist tracks (1-indexed, filter defaults) ─────────────
+    # ── Mixer: pass 2 — routing sweep (if enabled, with cap) ──────
+    if include_routing:
+        # Cap applies to cheap-retained tracks only.
+        if len(retained_for_routing) > MAX_RETAINED_INSERTS_FOR_ROUTING:
+            truncated_sections.append("routing")
+            sweep_indices = retained_for_routing[:MAX_RETAINED_INSERTS_FOR_ROUTING]
+            routing_swept_through = sweep_indices[-1] if sweep_indices else None
+        else:
+            sweep_indices = retained_for_routing
+        sweep_set = set(sweep_indices)
+        for entry in mixer_list:
+            if entry["index"] in sweep_set:
+                entry["routes_to"] = _mixer_routes(entry["index"])
+        # Second filter pass: a track that passed pass-1 by being non-default
+        # but had no routing/slots/name/color may now have outbound routes that
+        # the user explicitly set up. We keep tracks whose retained reason is
+        # any of: master, custom name, custom color, slots, or routes.
+        survivors = []
+        for entry in mixer_list:
+            if (entry["index"] == 0
+                    or not _is_default_mixer_name(entry["name"], entry["index"])
+                    or entry["color"] not in (0, mx_default_color)
+                    or entry["slot_count"] > 0
+                    or len(entry["routes_to"]) > 0):
+                survivors.append(entry)
+        mixer_list = survivors
+        # Route-only candidates: check routes and add to mixer_list if non-empty.
+        for i in route_only_candidates:
+            try:
+                routes = _mixer_routes(i)
+                if routes:
+                    entry = track_data[i]
+                    entry["routes_to"] = routes
+                    mixer_list.append(entry)
+            except Exception:
+                pass
+        # Re-sort mixer_list by index (route-only additions may be out of order).
+        mixer_list.sort(key=lambda e: e["index"])
+
+    # ── Playlist tracks ──────────────────────────────────────────
     playlist_list = []
     pl_count = playlist.trackCount()
     pl_default_color = _sample_default_color(playlist.getTrackColor, 1, pl_count)
     for i in range(1, pl_count + 1):
+        if len(playlist_list) >= MAX_PLAYLIST_TRACKS:
+            truncated_sections.append("playlist_tracks")
+            break
         try:
             name = playlist.getTrackName(i) or ""
             color = playlist.getTrackColor(i) & 0xFFFFFF
@@ -330,11 +404,14 @@ def _cmd_get_project_state(params):
         except Exception:
             pass
 
-    # ── Patterns (1-indexed, filter defaults) ────────────────────
+    # ── Patterns ─────────────────────────────────────────────────
     pattern_list = []
     pat_count = patterns.patternCount()
     pat_default_color = _sample_default_color(patterns.getPatternColor, 1, pat_count)
     for i in range(1, pat_count + 1):
+        if len(pattern_list) >= MAX_PATTERNS:
+            truncated_sections.append("patterns")
+            break
         try:
             name = patterns.getPatternName(i) or ""
             color = patterns.getPatternColor(i) & 0xFFFFFF
@@ -358,17 +435,15 @@ def _cmd_get_project_state(params):
         marker = " !! SLOW"
     print(
         "[Studio AI] get_project_state: "
-        "channels={} mixer={}/{} playlist={}/{} patterns={}/{} "
+        "channels={} mixer={} playlist={} patterns={} "
         "elapsed={:.3f}s{}".format(
-            len(channel_list),
-            len(mixer_list), mx_count,
-            len(playlist_list), pl_count,
-            len(pattern_list), pat_count,
+            len(channel_list), len(mixer_list),
+            len(playlist_list), len(pattern_list),
             elapsed, marker,
         )
     )
 
-    return {
+    response = {
         "bpm":             bpm,
         "project_name":    project_name,
         "playing":         is_playing,
@@ -380,6 +455,11 @@ def _cmd_get_project_state(params):
         "capabilities":    {k: v for k, v in caps.items() if not k.startswith("_")},
         "snapshot_at":     int(time.time()),
     }
+    if truncated_sections:
+        response["truncated_sections"] = sorted(set(truncated_sections))
+    if routing_swept_through is not None:
+        response["routing_swept_through"] = routing_swept_through
+    return response
 
 
 # Handler registry — get_project_state registered by Task 9.

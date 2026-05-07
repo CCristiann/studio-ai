@@ -361,5 +361,66 @@ class GetProjectStateTests(unittest.TestCase):
         })
 
 
+class TruncationTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_include_routing_false_skips_sweep(self):
+        # If include_routing=False, _mixer_routes should never be called.
+        # Check by configuring routes that, if the sweep ran, would appear.
+        self.mocks["mixer"].names = {5: "Bus"}
+        self.mocks["mixer"].routes = {(5, 88): True}
+        result = self.module._cmd_get_project_state({"include_routing": False})
+        track = next(t for t in result["mixer_tracks"] if t["index"] == 5)
+        self.assertEqual(track["routes_to"], [])
+
+    def test_channels_truncated_at_cap(self):
+        # 300 channels; cap is 256
+        self.mocks["channels"].names = {i: f"Ch{i}" for i in range(300)}
+        self.mocks["channels"].types = {i: 2 for i in range(300)}
+        result = self.module._cmd_get_project_state({})
+        self.assertEqual(len(result["channels"]), 256)
+        self.assertIn("channels", result.get("truncated_sections", []))
+
+    def test_patterns_truncated_at_cap(self):
+        self.mocks["patterns"].names = {i: f"P{i}" for i in range(1, 300)}
+        result = self.module._cmd_get_project_state({})
+        self.assertLessEqual(len(result["patterns"]), 256)
+        if len(result["patterns"]) == 256:
+            self.assertIn("patterns", result.get("truncated_sections", []))
+
+    def test_routing_truncated_when_too_many_retained_inserts(self):
+        # Force 110 retained inserts (>100 cap)
+        self.mocks["mixer"].names = {i: f"Insert {i}" + "X" for i in range(1, 111)}
+        # Configure routing on first track only; verify it appears
+        self.mocks["mixer"].routes = {(1, 90): True, (50, 91): True, (105, 92): True}
+        result = self.module._cmd_get_project_state({})
+        truncated = result.get("truncated_sections", [])
+        self.assertIn("routing", truncated)
+        self.assertIn("routing_swept_through", result)
+        # First 100 tracks (sorted by index ascending) sweep routing
+        track_1 = next((t for t in result["mixer_tracks"] if t["index"] == 1), None)
+        track_105 = next((t for t in result["mixer_tracks"] if t["index"] == 105), None)
+        self.assertIsNotNone(track_1)
+        self.assertEqual(track_1["routes_to"], [{"to_index": 90, "level": 0.8}])
+        if track_105:
+            self.assertEqual(track_105["routes_to"], [])
+
+    def test_no_truncated_sections_when_under_caps(self):
+        result = self.module._cmd_get_project_state({})
+        # Empty project → no truncation
+        self.assertNotIn("truncated_sections", result)
+
+
 if __name__ == "__main__":
     unittest.main()
