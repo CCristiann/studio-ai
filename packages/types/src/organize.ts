@@ -84,6 +84,7 @@ export type ChannelTypeLabel =
 
 export interface ChannelPluginInfo {
   name: string;
+  /** Raw FL channel-type code (`channels.getChannelType()`); `type_label` is the human-readable mapping. */
   type: number;
   type_label: ChannelTypeLabel;
 }
@@ -117,7 +118,7 @@ export interface MixerTrackInfo {
   volume: number;
   pan: number;
   muted: boolean;
-  /** # of loaded effect slots (0..10). */
+  /** Number of loaded effect slots on this track (0 to 10). */
   slot_count: number;
   /** Outbound routing graph. Empty array means only the implicit Master route. */
   routes_to: MixerRoute[];
@@ -146,10 +147,14 @@ export interface ProjectSelection {
 export interface ProjectCapabilities {
   fl_version: string;
   api_version: number;
+  /** `mixer.getRouteToLevel` available (FL 2024+). When false, `MixerRoute.level` is omitted. */
   has_send_levels: boolean;
+  /** `mixer.getEqGain/Frequency/Bandwidth` available (FL 2024+). When false, `get_mixer_eq` returns `available: false`. */
   has_eq_getters: boolean;
+  /** `general.saveUndo` available; when false, bulk applies cannot group into a single FL undo step. */
   has_save_undo: boolean;
   has_pattern_length: boolean;
+  /** `mixer.getSlotColor` available (FL 32+). When false, `get_mixer_chain` slot entries omit `color`. */
   has_slot_color: boolean;
 }
 
@@ -170,6 +175,7 @@ export interface EnhancedProjectState {
   patterns: PatternInfo[];
   selection: ProjectSelection;
   capabilities: ProjectCapabilities;
+  /** Unix epoch seconds at start of the bridge sweep. Use for client-side staleness checks. */
   snapshot_at: number;
   /** Present only when caps fired during enumeration. */
   truncated_sections?: TruncatedSection[];
