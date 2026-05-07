@@ -151,5 +151,55 @@ class ChannelPluginTests(unittest.TestCase):
         self.assertEqual(result, {"name": "", "type": 2, "type_label": "vst"})
 
 
+class MixerRoutesTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_mixer_routes_includes_active_sends_with_levels(self):
+        # Track 5 sends to tracks 7 and 12
+        self.mocks["mixer"].routes = {(5, 7): True, (5, 12): True}
+        self.mocks["mixer"].route_levels = {(5, 7): 0.5, (5, 12): 0.9}
+        result = self.module._mixer_routes(5)
+        self.assertEqual(len(result), 2)
+        self.assertIn({"to_index": 7, "level": 0.5}, result)
+        self.assertIn({"to_index": 12, "level": 0.9}, result)
+
+    def test_mixer_routes_skips_self_route(self):
+        self.mocks["mixer"].routes = {(5, 5): True, (5, 7): True}
+        result = self.module._mixer_routes(5)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["to_index"], 7)
+
+    def test_mixer_routes_empty_when_no_active_sends(self):
+        result = self.module._mixer_routes(3)
+        self.assertEqual(result, [])
+
+    def test_mixer_routes_omits_level_when_capability_absent(self):
+        del self.mocks["mixer"].getRouteToLevel
+        self.mocks["mixer"].routes = {(5, 7): True}
+        result = self.module._mixer_routes(5)
+        self.assertEqual(result, [{"to_index": 7}])
+
+    def test_mixer_routes_handles_per_call_exception_gracefully(self):
+        def flaky(src, dst):
+            if dst == 9:
+                raise RuntimeError("bad pair")
+            return src == 5 and dst in (7, 12)
+        self.mocks["mixer"].getRouteSendActive = flaky
+        result = self.module._mixer_routes(5)
+        targets = sorted(r["to_index"] for r in result)
+        self.assertEqual(targets, [7, 12])
+
+
 if __name__ == "__main__":
     unittest.main()

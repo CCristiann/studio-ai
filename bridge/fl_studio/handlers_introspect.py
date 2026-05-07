@@ -127,6 +127,35 @@ def _channel_plugin(idx):
     }
 
 
+def _mixer_routes(src):
+    """Return list of {to_index, level?} for outbound sends from src.
+
+    Excludes self-route. Level is included only when caps.has_send_levels
+    is true. Per-call exceptions are caught so a single bad pair doesn't
+    abort the sweep.
+    """
+    import mixer
+    caps = _probe_capabilities()
+    sends = []
+    track_count = mixer.trackCount()
+    for dst in range(track_count):
+        if dst == src:
+            continue
+        try:
+            if not bool(mixer.getRouteSendActive(src, dst)):
+                continue
+        except Exception:
+            continue
+        entry = {"to_index": dst}
+        if caps["has_send_levels"]:
+            try:
+                entry["level"] = round(float(mixer.getRouteToLevel(src, dst)), 3)
+            except Exception:
+                pass
+        sends.append(entry)
+    return sends
+
+
 # Handler registry — populated as later tasks add commands.
 INTROSPECT_HANDLERS = {
     # Note: get_project_state is NOT yet registered here. Task 9 adds it.
