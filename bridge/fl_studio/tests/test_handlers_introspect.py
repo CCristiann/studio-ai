@@ -579,5 +579,50 @@ class PluginParamsTests(unittest.TestCase):
         self.assertLess(result["returned_count"], 100)
 
 
+class GetMixerEqTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_returns_unavailable_when_capability_missing(self):
+        del self.mocks["mixer"].getEqGain
+        result = self.module._cmd_get_mixer_eq({"index": 5})
+        self.assertEqual(result["index"], 5)
+        self.assertFalse(result["available"])
+        self.assertNotIn("bands", result)
+
+    def test_returns_three_bands_when_available(self):
+        self.mocks["mixer"].eq = {
+            (5, 0): {"gain": 0.6, "freq": 0.2, "bw": 0.5},
+            (5, 1): {"gain": 0.5, "freq": 0.5, "bw": 0.5},
+            (5, 2): {"gain": 0.7, "freq": 0.8, "bw": 0.3},
+        }
+        result = self.module._cmd_get_mixer_eq({"index": 5})
+        self.assertTrue(result["available"])
+        self.assertEqual(set(result["bands"].keys()), {"low", "mid", "high"})
+        self.assertEqual(result["bands"]["low"]["gain"], 0.6)
+        self.assertEqual(result["bands"]["high"]["freq"], 0.8)
+
+    def test_per_band_failure_falls_back_to_neutral(self):
+        original_freq = self.mocks["mixer"].getEqFrequency
+        def freq_flaky(track, band):
+            if band == 1:
+                raise RuntimeError("mid band broken")
+            return original_freq(track, band)
+        self.mocks["mixer"].getEqFrequency = freq_flaky
+        result = self.module._cmd_get_mixer_eq({"index": 5})
+        self.assertTrue(result["available"])
+        self.assertEqual(result["bands"]["mid"]["freq"], 0.5)  # fallback
+
+
 if __name__ == "__main__":
     unittest.main()

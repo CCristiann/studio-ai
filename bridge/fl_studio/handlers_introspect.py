@@ -604,6 +604,36 @@ def _cmd_get_channel_plugin_params(params):
     return result
 
 
+def _cmd_get_mixer_eq(params):
+    """Read the 3-band EQ on one mixer track.
+
+    Returns {index, available: false} on FL <2024 (capability absent).
+    """
+    import mixer
+    caps = _probe_capabilities()
+    track = int((params or {}).get("index", 0))
+    if not caps["has_eq_getters"]:
+        return {"index": track, "available": False}
+
+    bands = {}
+    for band_name, band_idx in (("low", 0), ("mid", 1), ("high", 2)):
+        try:
+            gain = round(float(mixer.getEqGain(track, band_idx)), 4)
+        except Exception:
+            gain = 0.5
+        try:
+            freq = round(float(mixer.getEqFrequency(track, band_idx)), 4)
+        except Exception:
+            freq = 0.5
+        try:
+            bw = round(float(mixer.getEqBandwidth(track, band_idx)), 4)
+        except Exception:
+            bw = 0.5
+        bands[band_name] = {"gain": gain, "freq": freq, "bw": bw}
+
+    return {"index": track, "available": True, "bands": bands}
+
+
 # Handler registry — get_project_state registered by Task 9.
 # The capabilities probe is internal-only (not in the registry).
 INTROSPECT_HANDLERS = {}
@@ -613,3 +643,4 @@ INTROSPECT_HANDLERS["get_project_state"] = _cmd_get_project_state
 INTROSPECT_HANDLERS["get_mixer_chain"] = _cmd_get_mixer_chain
 INTROSPECT_HANDLERS["get_mixer_plugin_params"]   = _cmd_get_mixer_plugin_params
 INTROSPECT_HANDLERS["get_channel_plugin_params"] = _cmd_get_channel_plugin_params
+INTROSPECT_HANDLERS["get_mixer_eq"] = _cmd_get_mixer_eq
