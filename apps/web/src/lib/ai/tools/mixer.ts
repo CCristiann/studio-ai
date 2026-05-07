@@ -67,5 +67,40 @@ export function mixerTools(userId: string) {
       }),
       toRelay: ({ query, limit }) => ({ action: "find_mixer_track_by_name", params: { query, limit } }),
     }),
+
+    get_mixer_chain: relayTool(userId, {
+      description:
+        "List the effect-plugin chain on one mixer track (slot index → plugin name + " +
+        "color, plus a track-level slots_enabled flag). Use this to inspect signal " +
+        "chains — the vocal chain, drum-bus processing, mastering chain, etc. Returns " +
+        "{ success: false, error: 'INVALID_TRACK_INDEX' } if the index is out of range.",
+      inputSchema: z.object({ index: MX_INDEX }),
+      toRelay: ({ index }) => ({ action: "get_mixer_chain", params: { index } }),
+    }),
+
+    get_mixer_plugin_params: relayTool(userId, {
+      description:
+        "Dump parameter values for one plugin in a mixer slot. Use sparingly — large " +
+        "VSTs report hundreds of params. Default cap is 64; raise max_params only when " +
+        "you specifically need a deeper read. May return truncated_reason: 'TIME_BUDGET' " +
+        "if the plugin's GUI thread is hung; surface that honestly to the user.",
+      inputSchema: z.object({
+        track_index: MX_INDEX,
+        slot_index: z.number().int().min(0).max(9),
+        max_params: z.number().int().min(1).max(500).optional().default(64),
+      }),
+      toRelay: ({ track_index, slot_index, max_params }) => ({
+        action: "get_mixer_plugin_params",
+        params: { track_index, slot_index, max_params },
+      }),
+    }),
+
+    get_mixer_eq: relayTool(userId, {
+      description:
+        "Read the 3-band EQ values (low/mid/high) for one mixer track. Returns " +
+        "{ available: false } on FL versions older than 2024 — check before using values.",
+      inputSchema: z.object({ index: MX_INDEX }),
+      toRelay: ({ index }) => ({ action: "get_mixer_eq", params: { index } }),
+    }),
   };
 }
