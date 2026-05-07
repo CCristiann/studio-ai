@@ -21,11 +21,17 @@ describe("composeTools", () => {
     const tools = composeTools("user-1");
     const names = Object.keys(tools).sort();
     // Pinned: changing this list is a public-contract change. Update intentionally.
+    // NOTE: get_capabilities is intentionally NOT registered as an AI tool —
+    // it is a bridge-internal helper only.
     expect(names).toEqual([
       "apply_organization_plan",
       "find_channel_by_name",
       "find_mixer_track_by_name",
       "find_playlist_track_by_name",
+      "get_channel_plugin_params",
+      "get_mixer_chain",
+      "get_mixer_eq",
+      "get_mixer_plugin_params",
       "get_project_state",
       "organize_project",
       "play",
@@ -58,5 +64,14 @@ describe("composeTools", () => {
       expect((t as any).description, `${name} description`).toBeTruthy();
       expect(typeof (t as any).description).toBe("string");
     }
+  });
+
+  it("get_project_state accepts include_routing in its inputSchema", () => {
+    const tools = composeTools("user-1");
+    const tool = tools.get_project_state as unknown as { inputSchema: { safeParse: (v: unknown) => { success: boolean } } };
+    // include_routing is optional; both shapes must validate.
+    expect(tool.inputSchema.safeParse({ include_routing: false }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({ include_routing: true }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({}).success).toBe(true);
   });
 });
