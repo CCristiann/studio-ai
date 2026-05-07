@@ -65,7 +65,9 @@ def _probe_capabilities():
         mods = {"channels": channels, "mixer": mixer, "patterns": patterns,
                 "plugins": plugins, "general": general, "ui": ui}
         for key in has:
-            mod_name, fn_name = key.split(".")
+            # split(".", 1) tolerates future submodule keys like
+            # "ui.windows.getVisible"; current keys are all one-dot.
+            mod_name, fn_name = key.split(".", 1)
             has[key] = hasattr(mods[mod_name], fn_name)
         try:
             api_version = int(general.getVersion())

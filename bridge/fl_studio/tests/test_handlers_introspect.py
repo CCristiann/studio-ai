@@ -40,11 +40,17 @@ class CapabilityProbeTests(unittest.TestCase):
         self.assertTrue(caps["_has_floor_core"])
 
     def test_probe_caches_after_first_call(self):
+        # NOTE: this test relies on the cache returning the SAME dict object
+        # (not a copy). If _probe_capabilities is ever changed to return
+        # `dict(_CAPS)` or similar, this test stops verifying caching and
+        # silently passes — replace it with an identity check (`is`) or
+        # spy on the import path.
         first = self.module._probe_capabilities()
-        # Mutate the cache to prove the second call returns the same object.
         first["_test_marker"] = "cached"
         second = self.module._probe_capabilities()
         self.assertEqual(second.get("_test_marker"), "cached")
+        # Belt-and-suspenders: also assert identity directly.
+        self.assertIs(first, second)
 
     def test_probe_with_missing_fl_2024_features(self):
         # Strip FL 2024 functions
