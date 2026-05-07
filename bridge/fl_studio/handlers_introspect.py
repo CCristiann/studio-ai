@@ -156,6 +156,47 @@ def _mixer_routes(src):
     return sends
 
 
+def _mixer_slot_count(track):
+    """Return # of loaded effect slots on `track` (0..10).
+
+    Uses `continue` (not `break`) on per-slot exceptions: a single
+    misbehaving slot must not silently undercount the rest of the chain.
+    """
+    import plugins
+    n = 0
+    for slot in range(10):
+        try:
+            if bool(plugins.isValid(track, slot)):
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+def _selection():
+    """Return current selection state. Reads three FL functions sequentially
+    without locking; per-field exceptions degrade individual fields to None.
+    NOT a transactional snapshot — see spec §4.1 caveat.
+    """
+    import channels
+    import patterns
+    import mixer
+    sel = {"channel_index": None, "pattern_index": None, "mixer_track_index": None}
+    try:
+        sel["channel_index"] = int(channels.selectedChannel())
+    except Exception:
+        pass
+    try:
+        sel["pattern_index"] = int(patterns.patternNumber())
+    except Exception:
+        pass
+    try:
+        sel["mixer_track_index"] = int(mixer.trackNumber())
+    except Exception:
+        pass
+    return sel
+
+
 # Handler registry — populated as later tasks add commands.
 INTROSPECT_HANDLERS = {
     # Note: get_project_state is NOT yet registered here. Task 9 adds it.

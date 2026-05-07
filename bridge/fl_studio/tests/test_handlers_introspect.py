@@ -212,5 +212,58 @@ class MixerRoutesTests(unittest.TestCase):
         self.assertEqual(result[0], {"to_index": 7})  # no `level` key
 
 
+class SmallHelperTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def test_slot_count_matches_valid_slots(self):
+        self.mocks["plugins"].valid = {
+            (5, 0): True, (5, 1): True, (5, 3): True,  # 3 loaded
+        }
+        self.assertEqual(self.module._mixer_slot_count(5), 3)
+
+    def test_slot_count_zero_when_no_slots_loaded(self):
+        self.assertEqual(self.module._mixer_slot_count(5), 0)
+
+    def test_slot_count_continues_past_per_slot_exception(self):
+        def flaky(track, slot, useGlobalIndex=False):
+            if slot == 3:
+                raise RuntimeError("slot 3 broken")
+            return (track, slot) in {(5, 0), (5, 1), (5, 5), (5, 6)}
+        self.mocks["plugins"].isValid = flaky
+        # Slots 0,1 valid; 3 raises (skipped, not break); 5,6 valid → count = 4
+        self.assertEqual(self.module._mixer_slot_count(5), 4)
+
+    def test_selection_returns_all_three_indices(self):
+        self.mocks["channels"]._selected_channel = 7
+        self.mocks["patterns"]._selected_pattern = 12
+        self.mocks["mixer"]._selected_track = 4
+        sel = self.module._selection()
+        self.assertEqual(sel, {
+            "channel_index": 7, "pattern_index": 12, "mixer_track_index": 4,
+        })
+
+    def test_selection_partial_when_one_function_raises(self):
+        def boom(*a, **k):
+            raise RuntimeError("boom")
+        self.mocks["mixer"].trackNumber = boom
+        self.mocks["channels"]._selected_channel = 1
+        self.mocks["patterns"]._selected_pattern = 2
+        sel = self.module._selection()
+        self.assertEqual(sel["channel_index"], 1)
+        self.assertEqual(sel["pattern_index"], 2)
+        self.assertIsNone(sel["mixer_track_index"])
+
+
 if __name__ == "__main__":
     unittest.main()
