@@ -511,6 +511,99 @@ def _cmd_get_mixer_chain(params):
     return {"index": track, "slots_enabled": slots_enabled, "slots": slots}
 
 
+# ────────────────────────────────────────────────────────────────────
+# Plugin parameter dump — shared helper + two registered handlers
+# ────────────────────────────────────────────────────────────────────
+
+PARAM_TIME_BUDGET_S    = 2.0
+PARAM_TIME_CHECK_EVERY = 8
+
+
+def _dump_plugin_params(target, slot, max_params):
+    """Dump up to max_params params for the (target, slot) plugin.
+
+    target = mixer track index when slot >= 0
+    target = channel rack index when slot == -1
+    """
+    import plugins
+    start = time.time()
+
+    try:
+        if not bool(plugins.isValid(target, slot)):
+            return {"success": False, "error": "INVALID_TARGET"}
+    except Exception:
+        return {"success": False, "error": "INVALID_TARGET"}
+
+    name = ""
+    try:
+        name = plugins.getPluginName(target, slot) or ""
+    except Exception:
+        pass
+    try:
+        full_count = int(plugins.getParamCount(target, slot))
+    except Exception:
+        full_count = 0
+
+    n = min(full_count, int(max_params))
+    out = []
+    truncated_reason = None
+
+    for i in range(n):
+        if i and (i % PARAM_TIME_CHECK_EVERY == 0):
+            if time.time() - start > PARAM_TIME_BUDGET_S:
+                truncated_reason = "TIME_BUDGET"
+                break
+        try:
+            param = {
+                "index": i,
+                "name":  plugins.getParamName(i, target, slot) or "",
+                "value": round(float(plugins.getParamValue(i, target, slot)), 4),
+            }
+            try:
+                vs = plugins.getParamValueString(i, target, slot)
+                if vs:
+                    param["value_string"] = str(vs)
+            except Exception:
+                pass
+            out.append(param)
+        except Exception:
+            continue
+
+    if truncated_reason is None and full_count > len(out):
+        truncated_reason = "MAX_PARAMS"
+
+    elapsed_ms = int((time.time() - start) * 1000)
+    return {
+        "plugin_name":      name,
+        "param_count":      full_count,
+        "returned_count":   len(out),
+        "truncated":        truncated_reason is not None,
+        "truncated_reason": truncated_reason,
+        "elapsed_ms":       elapsed_ms,
+        "params":           out,
+    }
+
+
+def _cmd_get_mixer_plugin_params(params):
+    track = int((params or {}).get("track_index", 0))
+    slot  = int((params or {}).get("slot_index", 0))
+    max_params = max(1, min(500, int((params or {}).get("max_params", 64))))
+    result = _dump_plugin_params(track, slot, max_params)
+    if result.get("success") is None:  # success = no error key set
+        result["track_index"] = track
+        result["slot_index"]  = slot
+    return result
+
+
+def _cmd_get_channel_plugin_params(params):
+    channel = int((params or {}).get("channel_index", 0))
+    max_params = max(1, min(500, int((params or {}).get("max_params", 64))))
+    result = _dump_plugin_params(channel, -1, max_params)
+    if result.get("success") is None:
+        result["channel_index"] = channel
+    return result
+
+
 # Handler registry — get_project_state registered by Task 9.
 # The capabilities probe is internal-only (not in the registry).
 INTROSPECT_HANDLERS = {}
@@ -518,3 +611,5 @@ INTROSPECT_HANDLERS = {}
 # Register so device_studio_ai.py picks it up after Task 14 wires the dict.
 INTROSPECT_HANDLERS["get_project_state"] = _cmd_get_project_state
 INTROSPECT_HANDLERS["get_mixer_chain"] = _cmd_get_mixer_chain
+INTROSPECT_HANDLERS["get_mixer_plugin_params"]   = _cmd_get_mixer_plugin_params
+INTROSPECT_HANDLERS["get_channel_plugin_params"] = _cmd_get_channel_plugin_params

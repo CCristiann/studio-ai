@@ -487,5 +487,97 @@ class GetMixerChainTests(unittest.TestCase):
         self.assertFalse(result["slots_enabled"])
 
 
+class PluginParamsTests(unittest.TestCase):
+    def setUp(self):
+        self.mocks = install_fl_mocks()
+        import importlib
+        if "handlers_introspect" in sys.modules:
+            importlib.reload(sys.modules["handlers_introspect"])
+        import handlers_introspect
+        handlers_introspect._CAPS = None
+        self.module = handlers_introspect
+
+    def tearDown(self):
+        self.module._CAPS = None
+        uninstall_fl_mocks()
+
+    def _setup_plugin(self, target, slot, name, param_count):
+        self.mocks["plugins"].valid[(target, slot)] = True
+        self.mocks["plugins"].names[(target, slot)] = name
+        self.mocks["plugins"].param_counts[(target, slot)] = param_count
+        for i in range(param_count):
+            self.mocks["plugins"].param_names[(target, slot, i)] = f"P{i}"
+            self.mocks["plugins"].param_values[(target, slot, i)] = i / max(param_count, 1)
+
+    def test_mixer_plugin_params_returns_full_dump_within_cap(self):
+        self._setup_plugin(7, 0, "Pro-Q 3", 12)
+        result = self.module._cmd_get_mixer_plugin_params({
+            "track_index": 7, "slot_index": 0,
+        })
+        self.assertEqual(result["plugin_name"], "Pro-Q 3")
+        self.assertEqual(result["param_count"], 12)
+        self.assertEqual(result["returned_count"], 12)
+        self.assertFalse(result["truncated"])
+
+    def test_mixer_plugin_params_truncates_at_max_params(self):
+        self._setup_plugin(7, 0, "Serum", 800)
+        result = self.module._cmd_get_mixer_plugin_params({
+            "track_index": 7, "slot_index": 0, "max_params": 64,
+        })
+        self.assertEqual(result["param_count"], 800)
+        self.assertEqual(result["returned_count"], 64)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["truncated_reason"], "MAX_PARAMS")
+
+    def test_mixer_plugin_params_invalid_target(self):
+        # No valid entry for (7, 0)
+        result = self.module._cmd_get_mixer_plugin_params({
+            "track_index": 7, "slot_index": 0,
+        })
+        self.assertEqual(result.get("success"), False)
+        self.assertEqual(result.get("error"), "INVALID_TARGET")
+
+    def test_channel_plugin_params_for_sampler_returns_invalid_target(self):
+        # Sampler at channel 0 with no plugin instance
+        # plugins.isValid((0, -1)) returns False by default
+        result = self.module._cmd_get_channel_plugin_params({"channel_index": 0})
+        self.assertEqual(result.get("success"), False)
+        self.assertEqual(result.get("error"), "INVALID_TARGET")
+
+    def test_channel_plugin_params_returns_full_dump(self):
+        self._setup_plugin(3, -1, "Sytrus", 100)
+        result = self.module._cmd_get_channel_plugin_params({
+            "channel_index": 3, "max_params": 50,
+        })
+        self.assertEqual(result["plugin_name"], "Sytrus")
+        self.assertEqual(result["returned_count"], 50)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["truncated_reason"], "MAX_PARAMS")
+
+    def test_per_param_failure_continues(self):
+        self._setup_plugin(7, 0, "Buggy", 5)
+        # param 2 raises
+        self.mocks["plugins"]._raise_on_param.add((7, 0, 2))
+        result = self.module._cmd_get_mixer_plugin_params({
+            "track_index": 7, "slot_index": 0,
+        })
+        # 4 params returned (indices 0,1,3,4); param 2 skipped
+        self.assertEqual(result["returned_count"], 4)
+        param_indices = [p["index"] for p in result["params"]]
+        self.assertEqual(param_indices, [0, 1, 3, 4])
+
+    def test_time_budget_truncates_when_plugin_hangs(self):
+        self._setup_plugin(7, 0, "HungVST", 100)
+        # 0.05s per param × 100 params = 5s — well over the 2s budget.
+        # Budget check runs every 8 params; expect ~16-24 params returned.
+        self.mocks["plugins"]._sleep_per_param_s = 0.05
+        result = self.module._cmd_get_mixer_plugin_params({
+            "track_index": 7, "slot_index": 0,
+        })
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["truncated_reason"], "TIME_BUDGET")
+        self.assertLess(result["returned_count"], 100)
+
+
 if __name__ == "__main__":
     unittest.main()
