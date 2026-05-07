@@ -29,7 +29,7 @@ export function projectStateToMap(state: EnhancedProjectState): ProjectMap {
     channels: state.channels.map((c) => ({
       index: c.index,
       currentName: c.name,
-      plugin: c.plugin,
+      plugin: c.plugin ? `${c.plugin.name} (${c.plugin.type_label})` : "(unknown)",
       inferredRole: "unknown",
       roleGroup: "other" as const,
       confidence: "low" as const,
