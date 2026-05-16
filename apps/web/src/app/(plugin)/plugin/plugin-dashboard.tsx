@@ -183,7 +183,7 @@ export function PluginDashboard({
           panelContent={panelContent[activePanel]}
         />
 
-        <SidebarInset className="bg-background flex h-full min-w-0 flex-col overflow-hidden">
+        <SidebarInset className="bg-background grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
           <PluginTopbar
             projectName={pluginStatus?.bridge.project}
             dawName={pluginStatus?.bridge.daw}

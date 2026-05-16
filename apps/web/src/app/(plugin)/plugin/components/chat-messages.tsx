@@ -24,7 +24,7 @@ export function ChatMessages({
 
   if (messages.length === 0 && !isLoading) {
     return (
-      <div className="flex flex-1 min-h-0 items-center justify-center">
+      <div className="flex h-full min-h-0 items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
             AI
@@ -38,11 +38,11 @@ export function ChatMessages({
   }
 
   return (
-    <div className="relative flex-1 min-h-0">
+    <div className="relative h-full min-h-0 overflow-hidden">
       {/* Top fade */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-linear-to-b from-background to-transparent" />
 
-      <div ref={scrollRef} className="h-full overflow-y-auto">
+      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
         <div className="space-y-5 px-6 py-5">
           {messages.map((message) => (
             <div
