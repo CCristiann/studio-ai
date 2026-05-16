@@ -135,9 +135,18 @@ class SendPipeResponseTests(unittest.TestCase):
 
 
 class OnInitTransportLabelTests(unittest.TestCase):
-    """OnInit used to print 'MIDI SysEx transport' unconditionally, which
-    is wrong on macOS (pipe transport is active there). A stale label
-    hides the most basic diagnostic: 'which transport am I actually on?'."""
+    """OnInit's log must reflect reality at the moment it fires.
+
+    - macOS, plugin already up:  "pipe transport"
+    - macOS, plugin not yet up:  "waiting for plugin to open pipe"
+    - Windows:                    "MIDI SysEx transport"
+
+    Older code printed "MIDI SysEx" unconditionally when _USE_PIPE was
+    False, which hid the macOS startup race: a fresh FL launch sees
+    _USE_PIPE=False because the VST plugin hasn't opened fds 20/21 yet,
+    so the bridge falsely reported SysEx even though pipe was the right
+    transport once the plugin loaded.
+    """
 
     def setUp(self):
         install_fl_mocks()
@@ -149,8 +158,11 @@ class OnInitTransportLabelTests(unittest.TestCase):
                 importlib.reload(sys.modules[m])
         import device_studio_ai
         self.mod = device_studio_ai
+        # Tests poke _IS_WIN directly — capture original to restore.
+        self._orig_is_win = self.mod._IS_WIN
 
     def tearDown(self):
+        self.mod._IS_WIN = self._orig_is_win
         _uninstall_device_mock()
         uninstall_fl_mocks()
 
@@ -161,16 +173,108 @@ class OnInitTransportLabelTests(unittest.TestCase):
         return buf.getvalue()
 
     def test_logs_pipe_when_use_pipe_true(self):
+        self.mod._IS_WIN = False
         self.mod._USE_PIPE = True
         out = self._call_oninit()
         self.assertIn("pipe", out.lower())
         self.assertNotIn("sysex", out.lower())
 
-    def test_logs_sysex_when_use_pipe_false(self):
+    def test_logs_sysex_when_on_windows(self):
+        self.mod._IS_WIN = True
         self.mod._USE_PIPE = False
         out = self._call_oninit()
         self.assertIn("sysex", out.lower())
-        self.assertNotIn("pipe", out.lower())
+
+    def test_logs_waiting_when_unix_and_pipe_not_ready(self):
+        """The regression we're fixing: macOS + pipe not yet open must
+        not lie about SysEx. The bridge should say it's still waiting,
+        so debugging starts from "is the plugin loaded?" instead of
+        "why is macOS on the Windows path?"."""
+        self.mod._IS_WIN = False
+        self.mod._USE_PIPE = False
+        fake = _FakeTransport()
+        fake.try_connect = lambda: False  # pipe FDs not ready
+        self.mod._transport = fake
+        out = self._call_oninit()
+        self.assertIn("waiting", out.lower())
+        self.assertNotIn("sysex", out.lower())
+
+
+class PipeReadyRetryTests(unittest.TestCase):
+    """The whole point of the macOS fix: when the plugin loads AFTER the
+    script (the typical flow — script loads at FL startup, plugin loads
+    when a project opens), OnIdle must pick up the pipe transport as
+    soon as it becomes ready, with no manual script reload."""
+
+    def setUp(self):
+        install_fl_mocks()
+        _install_device_mock()
+        import importlib
+        for m in ("_protocol", "ipc_transport", "handlers_organize",
+                  "handlers_bulk", "device_studio_ai"):
+            if m in sys.modules:
+                importlib.reload(sys.modules[m])
+        import device_studio_ai
+        self.mod = device_studio_ai
+        self._orig_is_win = self.mod._IS_WIN
+        self.mod._IS_WIN = False
+        self.mod._USE_PIPE = False
+
+    def tearDown(self):
+        self.mod._IS_WIN = self._orig_is_win
+        _uninstall_device_mock()
+        uninstall_fl_mocks()
+
+    def test_onidle_activates_pipe_when_transport_becomes_ready(self):
+        fake = _FakeTransport()
+        attempts = {"n": 0}
+
+        def try_connect():
+            attempts["n"] += 1
+            return attempts["n"] >= 3  # ready on third try
+
+        fake.try_connect = try_connect
+        self.mod._transport = fake
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.mod.OnIdle()  # attempt 1 — not ready
+            self.assertFalse(self.mod._USE_PIPE)
+            self.mod.OnIdle()  # attempt 2 — not ready
+            self.assertFalse(self.mod._USE_PIPE)
+            self.mod.OnIdle()  # attempt 3 — ready → activate + log
+            self.assertTrue(self.mod._USE_PIPE)
+
+        self.assertIn("pipe transport active", buf.getvalue().lower())
+
+    def test_ensure_pipe_ready_is_noop_after_activation(self):
+        """Once active, don't keep calling try_connect every tick."""
+        fake = _FakeTransport()
+        calls = {"n": 0}
+
+        def try_connect():
+            calls["n"] += 1
+            return True
+
+        fake.try_connect = try_connect
+        self.mod._transport = fake
+        self.mod._ensure_pipe_ready()  # first call activates
+        self.assertTrue(self.mod._USE_PIPE)
+        self.assertEqual(calls["n"], 1)
+
+        for _ in range(5):
+            self.mod._ensure_pipe_ready()
+        self.assertEqual(calls["n"], 1)  # still 1, not retried
+
+    def test_ensure_pipe_ready_is_noop_on_windows(self):
+        self.mod._IS_WIN = True
+        fake = _FakeTransport()
+        calls = {"n": 0}
+        fake.try_connect = lambda: (calls.update(n=calls["n"] + 1) or True)
+        self.mod._transport = fake
+        self.mod._ensure_pipe_ready()
+        self.assertFalse(self.mod._USE_PIPE)
+        self.assertEqual(calls["n"], 0)
 
 
 if __name__ == "__main__":

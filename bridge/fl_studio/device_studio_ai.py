@@ -50,23 +50,55 @@ from handlers_organize import ORGANIZE_HANDLERS
 from handlers_bulk import BULK_HANDLERS
 from handlers_introspect import INTROSPECT_HANDLERS
 
+_IS_WIN = sys.platform == "win32"
+
 try:
     from ipc_transport import transport as _transport
-    _USE_PIPE = sys.platform != "win32" and _transport.try_connect()
 except Exception:
-    _USE_PIPE = False
+    _transport = None
+
+# Set lazily by _ensure_pipe_ready(). At module-import time the VST plugin
+# usually hasn't opened fds 20/21 yet — the MIDI script loads when FL Studio
+# starts, but the plugin only loads when a project containing it is opened.
+# A fresh FL launch with no project would always race; retrying on OnIdle
+# picks the pipes up as soon as the plugin is alive, with no manual reload.
+_USE_PIPE = False
 
 _pipe_buf = b""  # accumulate partial line-delimited reads from fd 20
+
+
+# ──────────────────── Transport bring-up ────────────────────
+
+def _ensure_pipe_ready():
+    """Activate the macOS pipe transport once fds 20/21 become readable.
+
+    No-op on Windows (SysEx is the only transport there) and after the pipe
+    has been activated once. Costs one fstat() pair per OnIdle tick while
+    waiting — negligible.
+    """
+    global _USE_PIPE
+    if _IS_WIN or _USE_PIPE or _transport is None:
+        return
+    if _transport.try_connect():
+        _USE_PIPE = True
+        _log("pipe transport active")
 
 
 # ──────────────────── FL Studio callbacks ────────────────────
 
 def OnInit():
-    # Label reflects reality: macOS uses the pipe backend, Windows uses
-    # MIDI SysEx. The old hardcoded "MIDI SysEx transport" string made it
-    # impossible to tell at a glance which path was active when debugging.
-    transport_name = "pipe" if _USE_PIPE else "MIDI SysEx"
-    _log("Studio AI bridge ready ({} transport)".format(transport_name))
+    # If the plugin loaded before the script (e.g. project opens with the
+    # plugin already instantiated and FL replays its load order), the pipe
+    # is already up at OnInit. Otherwise we log "waiting" and OnIdle picks
+    # it up shortly. Never lie about the transport — falsely claiming
+    # "MIDI SysEx" on macOS made the bridge look broken when it was fine.
+    _ensure_pipe_ready()
+    if _IS_WIN:
+        _log("Studio AI bridge ready (MIDI SysEx transport)")
+    elif _USE_PIPE:
+        _log("Studio AI bridge ready (pipe transport)")
+    else:
+        _log("Studio AI bridge ready (waiting for plugin to open pipe)")
 
 
 def OnDeInit():
@@ -75,7 +107,9 @@ def OnDeInit():
 
 def OnIdle():
     if not _USE_PIPE:
-        return
+        _ensure_pipe_ready()
+        if not _USE_PIPE:
+            return
     global _pipe_buf
     chunk = _transport.read_available()
     if not chunk:
