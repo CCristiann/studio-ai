@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card'
 import { useInitiateDeviceFlow } from '@/hooks/mutations/use-device-auth-mutations'
 import { authQueries } from '@/lib/query/queries/auth'
 import Dither from '@/components/Dither'
+import { Loader2 } from 'lucide-react'
 
 export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
   const [sessionId, setSessionId] = useState('')
@@ -108,7 +109,7 @@ export function PluginLogin({ onToken }: { onToken: (token: string) => void }) {
             className="w-full"
             disabled={initiate.isPending}
           >
-            {!initiate.isPending && 'Sign in with Browser'}
+            {initiate.isPending ? <Loader2 className='size-5 animate-spin' /> : 'Sign in with Browser'}
           </Button>
         ) : (
           <div className="space-y-3">
