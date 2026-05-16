@@ -4,6 +4,7 @@ import { useRef, useEffect } from "react";
 import { isToolUIPart, getToolName } from "ai";
 import type { UIMessage } from "ai";
 import Markdown from "react-markdown";
+import { cn } from "@/lib/utils";
 
 export function ChatMessages({
   messages,
@@ -23,12 +24,12 @@ export function ChatMessages({
 
   if (messages.length === 0 && !isLoading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 min-h-0 items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-b from-neutral-200 to-neutral-400 text-sm font-bold text-black">
+          <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
             AI
           </div>
-          <p className="text-sm text-[#555]">
+          <p className="text-sm text-muted-foreground">
             Tell me what to do in your DAW.
           </p>
         </div>
@@ -39,18 +40,17 @@ export function ChatMessages({
   return (
     <div className="relative flex-1 min-h-0">
       {/* Top fade */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-linear-to-b from-[#111] to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-linear-to-b from-background to-transparent" />
 
-      <div
-        ref={scrollRef}
-        className="h-full overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10"
-      >
+      <div ref={scrollRef} className="h-full overflow-y-auto">
         <div className="space-y-5 px-6 py-5">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
-                }`}
+              className={cn(
+                "flex gap-3",
+                message.role === "user" ? "justify-end" : "justify-start"
+              )}
             >
               <div className="max-w-2xl">
                 {message.parts.map((part, i) => {
@@ -58,10 +58,12 @@ export function ChatMessages({
                     return (
                       <div
                         key={i}
-                        className={`rounded-2xl px-4 py-3 text-[13px] leading-relaxed ${message.role === "user"
-                          ? "bg-white/[0.08] text-[#f0f0f0]"
-                          : "bg-white/[0.04] text-[#c8c8c8]"
-                          }`}
+                        className={cn(
+                          "rounded-2xl px-4 py-3 text-[13px] leading-relaxed",
+                          message.role === "user"
+                            ? "bg-secondary text-secondary-foreground"
+                            : "bg-muted text-foreground"
+                        )}
                       >
                         {message.role === "user" ? (
                           part.text
@@ -69,15 +71,15 @@ export function ChatMessages({
                           <Markdown
                             components={{
                               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                              strong: ({ children }) => <strong className="font-semibold text-[#e0e0e0]">{children}</strong>,
+                              strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
                               ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 last:mb-0">{children}</ul>,
                               ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 last:mb-0">{children}</ol>,
                               li: ({ children }) => <li>{children}</li>,
-                              h1: ({ children }) => <h1 className="mb-1 text-sm font-semibold text-[#e0e0e0]">{children}</h1>,
-                              h2: ({ children }) => <h2 className="mb-1 text-sm font-semibold text-[#e0e0e0]">{children}</h2>,
-                              h3: ({ children }) => <h3 className="mb-1 text-[13px] font-semibold text-[#e0e0e0]">{children}</h3>,
-                              code: ({ children }) => <code className="rounded bg-white/10 px-1 py-0.5 font-mono text-[11.5px] text-[#e0e0e0]">{children}</code>,
-                              pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-black/30 p-2.5 font-mono text-[11.5px] last:mb-0">{children}</pre>,
+                              h1: ({ children }) => <h1 className="mb-1 text-sm font-semibold">{children}</h1>,
+                              h2: ({ children }) => <h2 className="mb-1 text-sm font-semibold">{children}</h2>,
+                              h3: ({ children }) => <h3 className="mb-1 text-[13px] font-semibold">{children}</h3>,
+                              code: ({ children }) => <code className="rounded bg-background/60 px-1 py-0.5 font-mono text-[11.5px]">{children}</code>,
+                              pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-background/60 p-2.5 font-mono text-[11.5px] last:mb-0">{children}</pre>,
                             }}
                           >
                             {part.text}
@@ -98,9 +100,9 @@ export function ChatMessages({
                     return (
                       <div
                         key={i}
-                        className="mt-2 rounded-xl border border-green-500/10 bg-green-500/[0.04] px-3.5 py-2.5 font-mono text-[11.5px] leading-relaxed"
+                        className="mt-2 rounded-xl border border-green-500/15 bg-green-500/5 px-3.5 py-2.5 font-mono text-[11.5px] leading-relaxed"
                       >
-                        <div className="text-[#666]">
+                        <div className="text-muted-foreground">
                           {toolName}(
                           {toolPart.input !== undefined
                             ? JSON.stringify(toolPart.input)
@@ -109,7 +111,7 @@ export function ChatMessages({
                         </div>
                         {toolPart.state === "output-available" &&
                           toolPart.output !== undefined && (
-                            <div className="mt-1 text-green-400">
+                            <div className="mt-1 text-green-500">
                               &#10003; {JSON.stringify(toolPart.output)}
                             </div>
                           )}
@@ -124,8 +126,8 @@ export function ChatMessages({
           ))}
 
           {isLoading && (
-            <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-              <div className="flex items-center gap-2 text-[13px] text-[#555]">
+            <div className="rounded-2xl bg-muted px-4 py-3">
+              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                 <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
                 Thinking...
               </div>
@@ -133,7 +135,7 @@ export function ChatMessages({
           )}
 
           {error && (
-            <div className="mx-auto max-w-sm rounded-xl border border-red-500/10 bg-red-500/[0.04] px-4 py-3 text-center text-[13px] text-red-400">
+            <div className="mx-auto max-w-sm rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-center text-[13px] text-destructive">
               {error.message}
             </div>
           )}
@@ -143,7 +145,7 @@ export function ChatMessages({
       </div>
 
       {/* Bottom fade */}
-      <div className="pointer-events-none absolute inset-x-0 -bottom-0.5 z-10 h-8 bg-linear-to-t from-[#111] to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 -bottom-0.5 z-10 h-8 bg-linear-to-t from-background to-transparent" />
     </div>
   );
 }

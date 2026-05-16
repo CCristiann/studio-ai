@@ -141,10 +141,10 @@ export function PluginDashboard({
   const panelContent: Record<PanelId, React.ReactNode> = {
     chat: (
       <div className="p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-[#444] px-1">
+        <div className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Chat History
         </div>
-        <div className="mt-2 text-[12px] text-[#333] px-1">
+        <div className="mt-2 px-1 text-xs text-muted-foreground/60">
           Coming soon — multiple conversations per workspace.
         </div>
       </div>
@@ -170,7 +170,11 @@ export function PluginDashboard({
 
   return (
     <TooltipProvider delay={0}>
-      <SidebarProvider defaultOpen={false} style={{ "--sidebar-width": "320px", "--sidebar-width-icon": "60px" } as React.CSSProperties}>
+      <SidebarProvider
+        defaultOpen={false}
+        className="h-screen min-h-0 overflow-hidden"
+        style={{ "--sidebar-width": "320px", "--sidebar-width-icon": "60px" } as React.CSSProperties}
+      >
         <PluginSidebar
           activePanel={activePanel}
           onPanelChange={setActivePanel}
@@ -179,7 +183,7 @@ export function PluginDashboard({
           panelContent={panelContent[activePanel]}
         />
 
-        <SidebarInset className="bg-[#111] flex flex-col min-w-0">
+        <SidebarInset className="bg-background flex h-full min-w-0 flex-col overflow-hidden">
           <PluginTopbar
             projectName={pluginStatus?.bridge.project}
             dawName={pluginStatus?.bridge.daw}
