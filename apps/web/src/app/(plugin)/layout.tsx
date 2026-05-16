@@ -6,7 +6,7 @@ export default function PluginLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="dark bg-background flex h-screen w-screen overflow-hidden">
+    <div className="dark bg-background fixed inset-0 flex overflow-hidden">
       <PluginAuthProvider>
         {children}
       </PluginAuthProvider>
